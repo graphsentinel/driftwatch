@@ -24,10 +24,10 @@ spec:
     spec:
       containers:
         - name: agent
-          image: ghcr.io/kagent-dev/kagent/app:latest   # Kagent runtime (multi-component: controller/app/agents/* — pick what your setup runs; pin a release tag for repro)
+          image: PLACEHOLDER-agent-image   # stand-in slot. Real Kagent = Helm, not this Deployment — see ../README.md "Running against real Kagent / Goose (path B)"
           env:
             - name: MCP_PROXY_URL
-              value: "http://localhost:8080/v1/tool-call"   # route tool calls through the interceptor
+              value: "http://localhost:8080/v1/tool-call"   # the workload should route tool calls here
         - name: driftwatch-interceptor
           image: ghcr.io/graphsentinel/driftwatch:0.1.0a0
           command: ["driftwatch-interceptor"]
@@ -60,7 +60,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: ghcr.io/block/goose:latest        # official Goose image (pin a release tag, e.g. :v1.6.0, for repro)
+          image: PLACEHOLDER-agent-image   # stand-in slot. Real Goose image = ghcr.io/block/goose + wiring — see ../README.md "Running against real Kagent / Goose (path B)"
           env:
             - name: MCP_PROXY_URL
               value: "http://localhost:8080/v1/tool-call"

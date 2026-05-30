@@ -1,37 +1,34 @@
-# Manual sidecar injection — the no-webhook path.
+# Manual interceptor-sidecar injection — the supported path in v1alpha1 (the mutating
+# webhook injector is off by default). Add the driftwatch-interceptor container to your
+# agent pod spec so its tool calls are scored before they leave the pod.
 #
-# When you don't want the mutating webhook (or are on a locked-down cluster), add the
-# DriftWatch interceptor to a governed agent pod by hand: copy the `driftwatch-interceptor`
-# container block below into the agent's pod spec. The agent's tool/MCP client is pointed
-# at http://localhost:8080/v1/tool-call so every decision is scored before it leaves the pod.
+# This is a fragment, not a turnkey manifest: paste the driftwatch-interceptor container
+# into your Deployment's spec.template.spec.containers, and point your agent's tool path
+# at it (MCP_PROXY_URL=http://localhost:8080/v1/tool-call).
 #
-# This is the documented fallback the CFP references; the Helm chart's
-# templates/sidecar-injector.yaml automates the same thing via a mutating webhook.
+# NOTE: real Kagent is Helm-installed and controller-managed (it is not a hand-authored
+# Deployment, and the agent image is not set here). For that path DriftWatch intercepts
+# at the MCP tool-call hop — see examples/k3d-cluster-demo/README.md
+# "Running against real Kagent / Goose (path B)". This fragment fits a BYO agent image.
+#
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kagent-orchestrator           # your governed agent
-  labels:
-    app: kagent
-    driftwatch.graphsentinel.org/inject: "true"   # the webhook path keys off this label
+  name: your-agent            # <- your agent Deployment
+  namespace: driftwatch
+  labels: { app: your-agent }
 spec:
-  replicas: 1
-  selector:
-    matchLabels: { app: kagent }
   template:
-    metadata:
-      labels: { app: kagent }
     spec:
       containers:
-        # --- your agent container (unchanged) ---
+        # --- your agent container (BYO image) ---
         - name: agent
-          image: ghcr.io/kagent-dev/kagent/app:latest   # Kagent runtime (or another kagent component / your own agent image)
+          image: PLACEHOLDER-agent-image      # <- your agent image (real Kagent uses Helm, not this)
           env:
             # point the agent's tool path at the interceptor
             - name: MCP_PROXY_URL
               value: "http://localhost:8080/v1/tool-call"
-
-        # --- DriftWatch interceptor sidecar (copy this block to inject manually) ---
+        # --- DriftWatch interceptor sidecar (paste this into your pod) ---
         - name: driftwatch-interceptor
           image: ghcr.io/graphsentinel/driftwatch:0.1.0a0
           command: ["driftwatch-interceptor"]
@@ -39,7 +36,7 @@ spec:
             - { name: intercept, containerPort: 8080 }
           env:
             - name: DRIFTWATCH_OTLP_ENDPOINT
-              value: "host.k3d.internal:4317"     # decoupled obs target (config/otel-targets.yaml)
+              value: "host.k3d.internal:4317"
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
           resources:
