@@ -1,7 +1,7 @@
 # OTel Collector pipeline: receive the gen_ai.agent.* schema over OTLP and fan out to
 # the observability stack (Jaeger / Prometheus / Neo4j / Grafana). Runs in
 # podman-compose alongside the cluster; DriftWatch only pushes OTLP to it (the endpoint
-# the cluster targets is in config/otel-targets.yaml).
+# the cluster targets is the general reference in ../../config/otel-targets.yaml).
 receivers:
   otlp:
     protocols:

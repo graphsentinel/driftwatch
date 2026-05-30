@@ -8,7 +8,7 @@ services:
     image: otel/opentelemetry-collector-contrib:0.103.1
     command: ["--config=/etc/otel/collector.yaml"]
     volumes:
-      - ../../config/otel-collector.yaml:/etc/otel/collector.yaml:ro
+      - ./otel-collector.yaml:/etc/otel/collector.yaml:ro
     ports:
       - "4317:4317"     # OTLP gRPC  (host.k3d.internal:4317)
       - "4318:4318"     # OTLP HTTP
@@ -23,7 +23,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.52.0
     volumes:
-      - ../../config/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
 

@@ -31,7 +31,7 @@ Maps to: Implementation Plan S1; FR-2/FR-3; NFR-2; TC-D-*, TC-F-03/04/13.
 - `operator/policy.py`: cluster-free `validate()` (TC-F-01) + `Policy`; `model_seed` surfaces an optional `models:` source (FR-9).
 - `operator/reconcile.py`: `Reconciler` builds a live `BaselineStore` (memory/sqlite), folds runs, computes `status` (`baselineReady`, `observedTaskTypes`) — operator-written, never the user.
 - `operator/main.py`: Kopf validate/create/update/delete handlers; imports cleanly without kopf.
-- `config/otel-collector.yaml` (OTLP→Jaeger/Prometheus) + `config/otel-targets.yaml` (decoupled endpoint, host.k3d.internal:4317).
+- `config/otel-collector.yaml` (OTLP→Jaeger/Prometheus) + `config/otel-targets.yaml` (decoupled endpoint, host.k3d.internal:4317). *(collector config later moved to `examples/k3d-cluster-demo/` — it is demo-specific; `otel-targets.yaml` stays in `config/` as the general reference.)*
 - `tests/test_operator_otel.py`: 7 tests — valid/invalid policies, model-seed, reconcile status, OTel schema conformance (TC-F-08: no drift.* keys, score on event in [0,1]).
 
 Maps to: Implementation Plan S2; FR-4/5/6/9; Constraints C1; TC-F-01/02/08.
@@ -47,7 +47,7 @@ Maps to: Implementation Plan S3; FR-1/7/8; NFR-1/6; TC-F-05/06/07/09/10/11.
 ## S4 — Demo stack (Helm + k3d + podman-compose + five scenarios)
 - `cli.py`: `driftwatch demo <scenario>` runs all five scenarios through the real detection core (standalone — demo-safe, no cluster needed; identical in-cluster). Tiny SRE tool catalog (category/risk). `eval` subcommand wired to S5.
 - `examples/k3d-cluster-demo/`: `k3d-config.yaml` (cluster, host.k3d.internal), `compose.yaml` (OTel Collector + Jaeger + Prometheus + Grafana + Neo4j on podman-compose), `grafana-dashboard.json` (agent-decisions: gate.action, score.value p95, anomaly kinds, FP rate), README + DEMO_RUNBOOK (35-min beat sheet) + recordings/ placeholder.
-- `config/prometheus.yaml`: scrape the collector's drift metrics.
+- `config/prometheus.yaml`: scrape the collector's drift metrics. *(later moved to `examples/k3d-cluster-demo/` — demo-specific.)*
 - `deploy/helm/driftwatch/`: Chart + values + values-k3d (OTLP→host.k3d.internal) + templates (operator Deployment, RBAC ClusterRole/binding, CRD install). CRD vendored into the chart.
 - `make demo-1..5` / `cluster-up` / `obs-up` / `deploy` all wired.
 - `tests/test_cli_demos.py`: all five scenarios pass with correct anomaly.kind + action (tool→baseline_mismatch/block, scope→scope_creep/block, sequence→blocked_transition/drop, arg→arg_schema_novel/block, storm→drop).
