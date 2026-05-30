@@ -49,6 +49,11 @@ class Emitter:
         self.service_name = service_name
         self.endpoint = endpoint
         self._tracer = None
+        # Only wire a live OTLP exporter when an endpoint is explicitly configured.
+        # With no endpoint (tests, demos, offline scoring) we stay a pure dict builder —
+        # no background export thread, no global-provider side effects.
+        if not endpoint:
+            return
         try:  # optional dependency — interceptor extra
             from opentelemetry import trace
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -57,8 +62,7 @@ class Emitter:
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
             provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
-            exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
-            provider.add_span_processor(BatchSpanProcessor(exporter))
+            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
             trace.set_tracer_provider(provider)
             self._tracer = trace.get_tracer("driftwatch")
         except Exception:
