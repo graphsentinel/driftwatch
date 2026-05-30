@@ -54,3 +54,12 @@ Maps to: Implementation Plan S3; FR-1/7/8; NFR-1/6; TC-F-05/06/07/09/10/11.
 - Fix: demo interceptor shares the baseline's tool catalog so category/risk match (prevents spurious risk-escalation); sequence drift attributed to the destination tool.
 
 Maps to: Implementation Plan S4; Benefits §1; NFR-5; TC-D-02..07 end-to-end.
+
+## S5 — Evaluation harness + dataset
+- `evaluation_runner.py`: reads the `Prompt → Baseline → Toolchain → Deviation` JSONL, builds per-task baselines from the happy rows, scores every row, and reports **recall** (drift rows), **false-positive rate** (happy rows), **p95 scoring latency**, and the **inverse-scaling** OLS (β₁>0 ⇒ bigger models drift more). `make eval` prints the DATA-READY block.
+- `evaluation/datasets/drift.jsonl`: 112-row synthetic **seed** (8 model tiers × 6 tasks happy + drift across ambiguity v3/v4). Field names map 1:1 to the OTel schema. Seed is cleanly separable (recall≈100%, FP≈0%) — real headline numbers come from cluster-captured chains.
+- `evaluation/README.md`: dataset schema ↔ OTel mapping; seed-vs-real distinction.
+- `cli.py eval` wired to the runner.
+- `tests/test_eval_harness.py`: dataset shape, metric ranges, inverse-scaling computed (n≥20, β₁>0), summary renders. 37 total green.
+
+Maps to: Implementation Plan S5; NFR-3; inverse-scaling; abstract DATA-READY slot.
