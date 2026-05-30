@@ -72,3 +72,13 @@ Maps to: Implementation Plan S5; NFR-3; inverse-scaling; abstract DATA-READY slo
 - Full suite green (37) in ~/venv across all sprints.
 
 Maps to: Implementation Plan S6; NFR-3; FR-8; Constraints C1.
+
+## S6.1 — Consultant review fixes
+Five findings from the implementation review, all closed:
+- **CI green:** removed the unused `defaultdict` import in `evaluation_runner.py` (`ruff check src tests` now passes — CI no longer fails).
+- **Interceptor entrypoint:** added `interceptor/main.py` with `run()` (+ `build_default_interceptor`, OTLP endpoint from env); `pyproject` `driftwatch-interceptor = driftwatch.interceptor.main:run` now resolves. `server.py` keeps only `build_app`.
+- **OTel fingerprint emission:** `Decision` now carries `observed_scope/category/arg_hash/risk`; `build_span_attributes` emits `gen_ai.agent.tool.category`, `gen_ai.agent.tool.parameters_hash`, `gen_ai.agent.tool.risk_severity` alongside `gen_ai.tool.name` (full fingerprint on the span, Constraints C1).
+- **Helm sidecar path:** added `templates/sidecar-injector.yaml` (mutating webhook → injector Deployment + Service + MutatingWebhookConfiguration, gated by `webhook.enabled`, **off by default** in v1alpha1) + `deploy/sidecar-manual.yaml` (the supported no-webhook path: copy the interceptor sidecar block into the agent pod). `helm template` renders both modes.
+- **Eval honesty:** `summary()` now prints "seed-validation numbers — do NOT use for the CFP headline" instead of "fill DATA-READY slot".
+
+Suite: 28 passed; ruff clean; helm renders.

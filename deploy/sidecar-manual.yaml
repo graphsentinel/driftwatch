@@ -1,0 +1,47 @@
+# Manual sidecar injection — the no-webhook path.
+#
+# When you don't want the mutating webhook (or are on a locked-down cluster), add the
+# DriftWatch interceptor to a governed agent pod by hand: copy the `driftwatch-interceptor`
+# container block below into the agent's pod spec. The agent's tool/MCP client is pointed
+# at http://localhost:8080/v1/tool-call so every decision is scored before it leaves the pod.
+#
+# This is the documented fallback the CFP references; the Helm chart's
+# templates/sidecar-injector.yaml automates the same thing via a mutating webhook.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kagent-orchestrator           # your governed agent
+  labels:
+    app: kagent
+    driftwatch.graphsentinel.org/inject: "true"   # the webhook path keys off this label
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kagent }
+  template:
+    metadata:
+      labels: { app: kagent }
+    spec:
+      containers:
+        # --- your agent container (unchanged) ---
+        - name: agent
+          image: ghcr.io/example/kagent:latest
+          env:
+            # point the agent's tool path at the interceptor
+            - name: MCP_PROXY_URL
+              value: "http://localhost:8080/v1/tool-call"
+
+        # --- DriftWatch interceptor sidecar (copy this block to inject manually) ---
+        - name: driftwatch-interceptor
+          image: ghcr.io/graphsentinel/driftwatch:0.1.0a0
+          command: ["driftwatch-interceptor"]
+          ports:
+            - { name: intercept, containerPort: 8080 }
+          env:
+            - name: DRIFTWATCH_OTLP_ENDPOINT
+              value: "host.k3d.internal:4317"     # decoupled obs target (config/otel-targets.yaml)
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 128Mi }

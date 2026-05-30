@@ -30,13 +30,3 @@ def build_app(interceptor: Interceptor):  # pragma: no cover - needs fastapi
         return {"status": "ok"}
 
     return app
-
-
-def run() -> None:  # pragma: no cover - console entry point
-    import uvicorn
-
-    from ..adapters import KagentAdapter
-    from ..library.baseline import BaselineStore
-
-    interceptor = Interceptor(BaselineStore(), KagentAdapter())
-    uvicorn.run(build_app(interceptor), host="0.0.0.0", port=8080)

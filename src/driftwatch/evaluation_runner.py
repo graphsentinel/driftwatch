@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 
 from .library.baseline import BaselineStore
@@ -63,7 +62,9 @@ class EvalReport:
             f"  false-positive    : {self.false_positive_rate*100:.1f}%\n"
             f"  p95 scoring       : sub-{self.p95_latency_ms:.3f} ms\n"
             f"  inverse-scaling   : {b1}\n"
-            "  --> fill the abstract DATA-READY slot with the above"
+            "  NOTE: seed-validation numbers — do NOT use for the CFP headline.\n"
+            "        Replace datasets/drift.jsonl with real k3d-captured chains,\n"
+            "        then these become the abstract's DATA-READY values."
         )
 
 

@@ -26,6 +26,7 @@ all = ["driftwatch[operator,interceptor,graph,dev]"]
 [project.scripts]
 driftwatch-operator = "driftwatch.operator.main:run"
 driftwatch-interceptor = "driftwatch.interceptor.main:run"
+# (run() lives in interceptor/main.py; server.py holds the ASGI build_app)
 driftwatch-eval = "driftwatch.cli:eval_main"
 
 [tool.setuptools.packages.find]

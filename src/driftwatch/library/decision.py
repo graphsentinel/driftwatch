@@ -35,6 +35,10 @@ class Decision:
     baseline_match: bool
     expected_tools: list[str] = field(default_factory=list)
     observed_tool: str = ""
+    observed_scope: str = ""              # -> gen_ai.agent.tool.scope (via call)
+    observed_category: str = ""           # -> gen_ai.agent.tool.category
+    observed_arg_hash: str = ""           # -> gen_ai.agent.tool.parameters_hash
+    observed_risk: int = 0                # -> gen_ai.agent.tool.risk_severity
 
 
 def _label(score_value: float) -> str:
@@ -146,4 +150,8 @@ def _score_call(
         reason=reason,
         baseline_match=baseline_match,
         observed_tool=fp.tool,
+        observed_scope=fp.scope,
+        observed_category=fp.category,
+        observed_arg_hash=fp.arg_schema_hash,
+        observed_risk=fp.risk,
     )

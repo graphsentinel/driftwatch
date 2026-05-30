@@ -29,4 +29,8 @@ rbac:
   create: true
 
 webhook:
-  enabled: true
+  # Sidecar-injector mutating webhook. Default OFF in v1alpha1: the injector binary
+  # (driftwatch-injector) is roadmap; the supported path today is the manual sidecar
+  # in deploy/sidecar-manual.yaml. Set true once the injector image ships.
+  enabled: false
+  failurePolicy: Ignore        # Ignore so a webhook outage never blocks pod creation
