@@ -60,7 +60,7 @@ Maps to: Implementation Plan S4; Benefits §1; NFR-5; TC-D-02..07 end-to-end.
 - `evaluation/datasets/drift.jsonl`: 112-row synthetic **seed** (8 model tiers × 6 tasks happy + drift across ambiguity v3/v4). Field names map 1:1 to the OTel schema. Seed is cleanly separable (recall≈100%, FP≈0%) — real headline numbers come from cluster-captured chains.
 - `evaluation/README.md`: dataset schema ↔ OTel mapping; seed-vs-real distinction.
 - `cli.py eval` wired to the runner.
-- `tests/test_eval_harness.py`: dataset shape, metric ranges, inverse-scaling computed (n≥20, β₁>0), summary renders. 37 total green.
+- `tests/test_eval_harness.py`: dataset shape, metric ranges, inverse-scaling computed (n≥20, β₁>0), summary renders.
 
 Maps to: Implementation Plan S5; NFR-3; inverse-scaling; abstract DATA-READY slot.
 
@@ -69,7 +69,11 @@ Maps to: Implementation Plan S5; NFR-3; inverse-scaling; abstract DATA-READY slo
 - `Docs/adapter-guide.md`: how to write a runtime adapter against the SDK (FR-8) — ~10 lines, inherit all four-feature scoring + OTel emission.
 - `Docs/architecture.md`: implementation architecture, module map, the decision-not-API-object invariant, OTel C1 compliance.
 - `examples/k3d-cluster-demo/recordings/README.md`: asciinema fallback workflow for all five scenarios.
-- Full suite green (37) in ~/venv across all sprints.
+- Full suite green in ~/venv across all sprints.
+
+> Note on counts: the per-sprint "N total green" figures in earlier entries were
+> projected while test collection was briefly broken (db import bug, fixed in
+> 57e11e2). The verified full-suite total is **28 passed** — see S6.1 below.
 
 Maps to: Implementation Plan S6; NFR-3; FR-8; Constraints C1.
 
