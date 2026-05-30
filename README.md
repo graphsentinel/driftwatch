@@ -24,7 +24,7 @@ to Kyverno/OPA, not a replacement.
 | `src/driftwatch/sdk/` | stable contract for runtime-adapter authors |
 | `src/driftwatch/adapters/` | built-in `kagent` / `goose` + custom example |
 | `src/driftwatch/db/` | baseline persistence (memory / sqlite) |
-| `src/driftwatch/graph/` | optional Neo4j decision-graph forensics |
+| `src/driftwatch/graph/` | Neo4j decision-graph forensics — **roadmap/stub** (exporter not wired in v1alpha1) |
 | `src/driftwatch/otel/` | `gen_ai.agent.*` emission (Observability Summit semconv) |
 | `src/driftwatch/operator/` | Kopf control plane |
 | `src/driftwatch/interceptor/` | data-plane sidecar |

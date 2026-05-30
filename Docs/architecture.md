@@ -16,8 +16,9 @@ API.
                                                                 │ OTLP push
                                                                 ▼  host.k3d.internal:4317
                        Observability stack (podman-compose, decoupled)
-            OTel Collector ─► Jaeger (traces) / Prometheus (metrics) / Neo4j (graph)
+            OTel Collector ─► Jaeger (traces) / Prometheus (metrics)
                                           └► Grafana (agent-decisions)
+            [Neo4j (decision graph) — roadmap; exporter not wired in v1alpha1]
 ```
 
 ## Module map
@@ -27,7 +28,7 @@ API.
 | contract | `sdk/` | `ToolCall`, `DecisionChain`, `RuntimeAdapter` — the stable boundary |
 | detection | `library/` | fingerprint, ngram, zscore, baseline, decision, scaling — pure stats |
 | persistence | `db/` | `MemoryBackend` / `SqliteBackend` behind one interface |
-| forensics | `graph/` | optional Neo4j decision-graph (default-off) |
+| forensics | `graph/` | Neo4j decision-graph — **roadmap/stub** (exporter not wired in v1alpha1) |
 | emission | `otel/` | `gen_ai.agent.*` span attrs + `gen_ai.evaluation.result` event |
 | control plane | `operator/` | Kopf reconcile + validate; cluster-free `policy`/`reconcile` |
 | data plane | `interceptor/` | enforcement engine + FastAPI sidecar |

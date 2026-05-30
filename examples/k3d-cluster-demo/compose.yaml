@@ -1,7 +1,8 @@
 # Observability stack — decoupled, runs in podman-compose on the host (make obs-up).
-# Same backends as the Observability Summit demo. DriftWatch in the k3d cluster only
-# pushes OTLP here via host.k3d.internal:4317. Where this lives never changes what the
-# cluster enforces.
+# Default services: OTel Collector + Jaeger + Prometheus + Grafana.
+# Neo4j (decision-graph forensics) is roadmap — behind the `forensics` profile, off by
+# default. DriftWatch in the k3d cluster only pushes OTLP here via host.k3d.internal:4317.
+# Where this lives never changes what the cluster enforces.
 version: "3.9"
 services:
   otel-collector:
@@ -37,8 +38,13 @@ services:
     ports:
       - "3000:3000"     # Grafana UI
 
-  neo4j:                # optional decision-graph forensics (default-off in policy)
+  # ROADMAP — decision-graph forensics is not wired yet in v1alpha1:
+  # the src/driftwatch/graph/ exporter is a stub, so nothing writes to Neo4j.
+  # Kept behind a compose profile so `make obs-up` does NOT start an empty DB.
+  # Enable once the exporter lands:  podman-compose --profile forensics up -d
+  neo4j:
     image: neo4j:5.20
+    profiles: ["forensics"]      # opt-in only — roadmap, not part of the default demo
     environment:
       - NEO4J_AUTH=neo4j/driftwatch
     ports:

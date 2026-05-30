@@ -1,9 +1,13 @@
 # DriftWatch — k3d live demo
 
 The five drift scenarios from the talk, reproducible end-to-end. Governance runs in a
-k3d cluster; the observability stack (Jaeger / Prometheus / Grafana / Neo4j) runs in
+k3d cluster; the observability stack (Jaeger / Prometheus / Grafana) runs in
 podman-compose on the host. They are decoupled — DriftWatch only pushes OTLP to
 `host.k3d.internal:4317`.
+
+> Neo4j decision-graph forensics is **roadmap**: a Neo4j service exists in
+> `compose.yaml` behind a `forensics` profile (off by default), but the exporter
+> (`src/driftwatch/graph/`) is a stub, so nothing is written to it yet.
 
 > `make` targets below are this directory's [Makefile](Makefile). Project-wide targets
 > (`install`, `test`, `lint`, `eval`) live in the root Makefile — run as
@@ -18,7 +22,8 @@ make -C ../.. install    # editable install into your env (root Makefile)
 ## Bring it up
 
 ```bash
-make obs-up             # podman-compose: OTel Collector + Jaeger + Prometheus + Grafana (+ Neo4j)
+make obs-up             # podman-compose: OTel Collector + Jaeger + Prometheus + Grafana
+                        # (Neo4j is roadmap — opt in with: podman-compose --profile forensics up -d)
 make cluster-up         # k3d cluster (driftwatch-demo)
 make deploy             # helm install DriftWatch with values-k3d.yaml
 # (or: make up   — all three at once)
