@@ -25,7 +25,7 @@ spec:
       containers:
         # --- your agent container (unchanged) ---
         - name: agent
-          image: ghcr.io/example/kagent:latest
+          image: ghcr.io/kagent-dev/kagent/app:latest   # Kagent runtime (or another kagent component / your own agent image)
           env:
             # point the agent's tool path at the interceptor
             - name: MCP_PROXY_URL
