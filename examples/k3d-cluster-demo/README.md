@@ -38,11 +38,21 @@ make demo-5   # retry storm          -> baseline_mismatch  -> drop
 In-cluster, the same chains flow through the injected interceptor sidecar; the
 `gen_ai.agent.*` spans + `gen_ai.evaluation.result` events land in Grafana live.
 
-## Shadow-mode on-ramp (NFR-5)
+## Apply the demo manifests (in-cluster)
 
-Start with `config/policies/shadow-mode.yaml` (`action: log`): nothing is blocked, but
-every would-have-blocked decision shows up in OTel. Flip to
-`config/policies/kagent-cluster-ops.yaml` (`action: block`) once you trust the baseline.
+The demo's own CRs live in [`manifests/`](manifests/) — self-contained, k3d-specific
+(OTLP → `host.k3d.internal:4317`, `driftwatch` namespace):
+
+```bash
+kubectl apply -f manifests/sample-agents.yaml             # Kagent + Goose, each with the sidecar
+kubectl apply -f manifests/agentdriftpolicy-shadow.yaml   # shadow on-ramp (action: log) — NFR-5
+# ...watch Grafana, tune window/threshold...
+kubectl apply -f manifests/agentdriftpolicy-enforce.yaml  # enforce (action: block) once trusted
+```
+
+In shadow nothing is blocked, but every would-have-blocked decision shows up in OTel;
+enforce stops drift with a 403 before kube-apiserver. (For general, non-demo templates
+see [`../../config/policies/`](../../config/policies/).)
 
 ## Tear down
 

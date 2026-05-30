@@ -1,0 +1,79 @@
+# Demo agent workloads: a Kagent-style and a Goose-style agent, each governed by the
+# demo policy (label app=kagent) and each carrying the DriftWatch interceptor sidecar.
+# The agents' tool/MCP client is pointed at the interceptor on localhost:8080, so every
+# decision is scored before it can leave the pod.
+#
+# These are placeholders that stand in for the real runtimes during the demo — replace
+# the agent image with the actual Kagent / Goose image when wiring a live cluster.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kagent-orchestrator
+  namespace: driftwatch
+  labels:
+    app: kagent                                   # demo policy selector matches this
+    driftwatch.graphsentinel.org/inject: "true"   # webhook path keys off this (when enabled)
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kagent, agent: kagent-orchestrator }
+  template:
+    metadata:
+      labels: { app: kagent, agent: kagent-orchestrator }
+    spec:
+      containers:
+        - name: agent
+          image: ghcr.io/example/kagent:latest     # <- replace with the real Kagent image
+          env:
+            - name: MCP_PROXY_URL
+              value: "http://localhost:8080/v1/tool-call"   # route tool calls through the interceptor
+        - name: driftwatch-interceptor
+          image: ghcr.io/graphsentinel/driftwatch:0.1.0a0
+          command: ["driftwatch-interceptor"]
+          ports:
+            - { name: intercept, containerPort: 8080 }
+          env:
+            - name: DRIFTWATCH_OTLP_ENDPOINT
+              value: "host.k3d.internal:4317"
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goose-runner
+  namespace: driftwatch
+  labels:
+    app: kagent                                   # same governing policy
+    driftwatch.graphsentinel.org/inject: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kagent, agent: goose-runner }
+  template:
+    metadata:
+      labels: { app: kagent, agent: goose-runner }
+    spec:
+      containers:
+        - name: agent
+          image: ghcr.io/example/goose:latest      # <- replace with the real Goose image
+          env:
+            - name: MCP_PROXY_URL
+              value: "http://localhost:8080/v1/tool-call"
+        - name: driftwatch-interceptor
+          image: ghcr.io/graphsentinel/driftwatch:0.1.0a0
+          command: ["driftwatch-interceptor"]
+          ports:
+            - { name: intercept, containerPort: 8080 }
+          env:
+            - name: DRIFTWATCH_OTLP_ENDPOINT
+              value: "host.k3d.internal:4317"
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
