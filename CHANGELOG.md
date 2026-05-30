@@ -24,3 +24,14 @@ Each entry corresponds to one sprint commit.
 - Detection core adapted from Obs-Summit `gen_ai_otel/observation` (types/baseline/analyzer/scaling), generalized to the four-feature model.
 
 Maps to: Implementation Plan S1; FR-2/FR-3; NFR-2; TC-D-*, TC-F-03/04/13.
+
+## S2 — OTel emission + operator (Kopf)
+- `otel/attributes.py`: gen_ai.agent.* / gen_ai.evaluation.* constants, verbatim from the Obs-Summit semconv. No `drift.*` namespace (C1). Additive: `gen_ai.agent.gate.action`, `computed.anomaly.kind=arg_schema_novel`.
+- `otel/emit.py`: `build_span_attributes` (identity/baseline/gate on the span) + `build_evaluation_event` (score on the event); `Emitter` pushes OTLP or no-ops if OTel isn't installed (graceful).
+- `operator/policy.py`: cluster-free `validate()` (TC-F-01) + `Policy`; `model_seed` surfaces an optional `models:` source (FR-9).
+- `operator/reconcile.py`: `Reconciler` builds a live `BaselineStore` (memory/sqlite), folds runs, computes `status` (`baselineReady`, `observedTaskTypes`) — operator-written, never the user.
+- `operator/main.py`: Kopf validate/create/update/delete handlers; imports cleanly without kopf.
+- `config/otel-collector.yaml` (OTLP→Jaeger/Prometheus) + `config/otel-targets.yaml` (decoupled endpoint, host.k3d.internal:4317).
+- `tests/test_operator_otel.py`: 7 tests — valid/invalid policies, model-seed, reconcile status, OTel schema conformance (TC-F-08: no drift.* keys, score on event in [0,1]). 16 total green.
+
+Maps to: Implementation Plan S2; FR-4/5/6/9; Constraints C1; TC-F-01/02/08.
