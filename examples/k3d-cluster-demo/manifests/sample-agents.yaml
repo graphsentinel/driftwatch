@@ -24,7 +24,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: ghcr.io/example/kagent:latest     # <- replace with the real Kagent image
+          image: ghcr.io/kagent-dev/kagent/app:latest   # Kagent runtime (multi-component: controller/app/agents/* — pick what your setup runs; pin a release tag for repro)
           env:
             - name: MCP_PROXY_URL
               value: "http://localhost:8080/v1/tool-call"   # route tool calls through the interceptor
@@ -60,7 +60,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: ghcr.io/example/goose:latest      # <- replace with the real Goose image
+          image: ghcr.io/block/goose:latest        # official Goose image (pin a release tag, e.g. :v1.6.0, for repro)
           env:
             - name: MCP_PROXY_URL
               value: "http://localhost:8080/v1/tool-call"
