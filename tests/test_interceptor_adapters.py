@@ -8,11 +8,13 @@ from driftwatch.sdk import DecisionChain, RuntimeAdapter, ToolCall
 
 
 def _ready_store(task="investigate_latency"):
+    # scope must match what KagentAdapter produces from {"namespace": "checkout"},
+    # i.e. "checkout" — the interceptor path normalizes through the adapter.
     store = BaselineStore(window=10)
     for _ in range(3):
         c = DecisionChain(task_type=task)
-        c.add(ToolCall(tool="QueryMetrics", scope="ns/checkout", category="observability"))
-        c.add(ToolCall(tool="QueryLogs", scope="ns/checkout", category="observability"))
+        c.add(ToolCall(tool="QueryMetrics", scope="checkout", category="observability"))
+        c.add(ToolCall(tool="QueryLogs", scope="checkout", category="observability"))
         store.fold(c)
     return store
 
