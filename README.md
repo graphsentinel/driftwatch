@@ -29,7 +29,7 @@ to Kyverno/OPA, not a replacement.
 | `src/driftwatch/operator/` | Kopf control plane |
 | `src/driftwatch/interceptor/` | data-plane sidecar |
 | `config/` | sample policies, OTel targets/collector, seed models |
-| `deploy/` | Helm chart + raw CRD manifest |
+| `deploy/` | Helm chart + raw CRD manifest + [install guide](deploy/README.md) |
 | `evaluation/` | dataset + `make eval` harness |
 | `examples/k3d-cluster-demo/` | the five live demo scenarios |
 
@@ -42,6 +42,21 @@ make eval             # run the drift dataset → recall / FP-rate / p95
 ```
 
 See the [Makefile](Makefile) for cluster/demo targets.
+
+## Install (on a cluster)
+
+Install the governance plane (CRD + operator + RBAC) from the published chart, then
+drive it with a policy:
+
+```bash
+helm install driftwatch oci://ghcr.io/graphsentinel/charts/driftwatch --version 0.1.0 \
+  --namespace driftwatch --create-namespace \
+  --set otel.endpoint=host.k3d.internal:4317
+kubectl apply -f config/policies/shadow-mode.yaml      # shadow first, then enforce
+```
+
+Full install, policy, sidecar, values, and troubleshooting → **[deploy/README.md](deploy/README.md)**.
+Publishing the image + chart to GHCR (maintainer) → **[Docs/publishing-ghcr.md](Docs/publishing-ghcr.md)**.
 
 ## Status
 
