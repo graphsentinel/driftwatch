@@ -9,7 +9,7 @@ and adapt for your own cluster. The CRD field reference is
 |---|---|
 | `agentdriftpolicy-shadow.yaml` | the on-ramp policy — `action: log`, blocks nothing |
 | `agentdriftpolicy-enforce.yaml` | the enforcing policy — `action: block` (403 on drift) |
-| `sample-agents.yaml` | Kagent + Goose demo workloads, each with the interceptor sidecar |
+| `sample-agents.yaml` | **stand-in** workloads (path A) with the interceptor sidecar — not real Kagent |
 
 ## Apply
 
@@ -20,5 +20,7 @@ kubectl apply -f manifests/agentdriftpolicy-shadow.yaml # shadow first
 kubectl apply -f manifests/agentdriftpolicy-enforce.yaml # then enforce
 ```
 
-Both agents carry `app: kagent`, so one policy governs both. Swap the placeholder agent
-images for the real Kagent / Goose images when wiring a live cluster.
+Both stand-ins carry `app: kagent`, so one policy governs both. These are **not** real
+Kagent (which is Helm-installed and controller-managed) — for the Helm-based path B
+where DriftWatch intercepts at the MCP tool-call hop, see the parent
+[README](../README.md#running-against-real-kagent--goose-path-b).

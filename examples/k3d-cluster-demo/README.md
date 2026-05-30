@@ -54,7 +54,7 @@ The demo's own CRs live in [`manifests/`](manifests/) — self-contained, k3d-sp
 (OTLP → `host.k3d.internal:4317`, `driftwatch` namespace):
 
 ```bash
-kubectl apply -f manifests/sample-agents.yaml             # Kagent + Goose, each with the sidecar
+kubectl apply -f manifests/sample-agents.yaml             # STAND-IN workloads (path A), each with the sidecar
 kubectl apply -f manifests/agentdriftpolicy-shadow.yaml   # shadow on-ramp (action: log) — NFR-5
 # ...watch Grafana, tune window/threshold...
 kubectl apply -f manifests/agentdriftpolicy-enforce.yaml  # enforce (action: block) once trusted
@@ -64,6 +64,33 @@ In shadow nothing is blocked, but every would-have-blocked decision shows up in 
 enforce stops drift with a 403 before kube-apiserver. These manifests are the policy
 set — copy and adapt them for your own cluster (the CRD field reference is
 [`../../deploy/crd/agentdriftpolicy.yaml`](../../deploy/crd/agentdriftpolicy.yaml)).
+
+## Running against real Kagent / Goose (path B)
+
+What ships in `manifests/sample-agents.yaml` is a **stand-in** (path A): hand-authored
+Deployments that emit deterministic tool-call traffic through the interceptor — the
+reproducible fallback for the stage. It is **not** how real Kagent runs.
+
+Real Kagent is **Helm-installed and controller-managed**: its controller creates an
+agent pod per `Agent` CRD, and tool calls leave the agent pod over the network to
+separate **MCP ToolServer** pods.
+
+```bash
+# Kagent (controller creates an agent pod per Agent CRD)
+helm install kagent-crds oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds -n kagent --create-namespace
+helm install kagent      oci://ghcr.io/kagent-dev/kagent/helm/kagent      -n kagent \
+  --set providers.default=openAI --set providers.openAI.apiKey=$OPENAI_API_KEY
+# Goose runs from the official image: ghcr.io/block/goose
+```
+
+That MCP tool-call hop *is* the decision plane DriftWatch governs. The integration point
+is to register DriftWatch as an **MCP proxy** (point Kagent's `RemoteMCPServer` at it);
+it scores each `(tool, scope, argSchemaHash)` and `log`/`drop`/`block`s before the call
+reaches the real ToolServer.
+
+> **Roadmap:** the DriftWatch **MCP-proxy adapter** for path B is the next sprint. Until
+> it lands, the stand-in (path A) is the supported live-demo path and `make demo` is the
+> in-process equivalent.
 
 ## Tear down
 

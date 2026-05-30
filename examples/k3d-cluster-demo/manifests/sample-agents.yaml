@@ -1,10 +1,20 @@
-# Demo agent workloads: a Kagent-style and a Goose-style agent, each governed by the
-# demo policy (label app=kagent) and each carrying the DriftWatch interceptor sidecar.
-# The agents' tool/MCP client is pointed at the interceptor on localhost:8080, so every
-# decision is scored before it can leave the pod.
+# Demo agent workloads — STAND-INS (demo path A, the deterministic fallback).
 #
-# These are placeholders that stand in for the real runtimes during the demo — replace
-# the agent image with the actual Kagent / Goose image when wiring a live cluster.
+# Each is a hand-authored Deployment labelled app=kagent that carries the DriftWatch
+# interceptor sidecar; the workload routes its tool calls at the interceptor on
+# localhost:8080, so every decision is scored before it can leave the pod.
+#
+# NOTE — this is NOT how real Kagent runs. Real Kagent is Helm-installed and its
+# controller creates an agent pod from an `Agent` CRD; tool calls go over the network to
+# separate MCP ToolServer pods. For that path (path B), DriftWatch intercepts at the MCP
+# tool-call hop (point Kagent's RemoteMCPServer at the DriftWatch MCP proxy) — see
+# ../README.md "Running against real Kagent / Goose (path B)". The MCP-proxy adapter is
+# the next sprint; the working demo today is in-process (`make demo`).
+#
+# This manifest is a TOPOLOGY SCAFFOLD: it shows where the interceptor sidecar sits
+# relative to an agent container. The `image:` fields are PLACEHOLDER slots — drop in
+# your own workload that POSTs its tool calls to MCP_PROXY_URL.
+#
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -24,7 +34,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: PLACEHOLDER-agent-image   # stand-in slot. Real Kagent = Helm, not this Deployment — see ../README.md "Running against real Kagent / Goose (path B)"
+          image: PLACEHOLDER-agent-image   # stand-in slot. Real Kagent = Helm, not this Deployment (see README path B)
           env:
             - name: MCP_PROXY_URL
               value: "http://localhost:8080/v1/tool-call"   # the workload should route tool calls here
@@ -60,7 +70,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: PLACEHOLDER-agent-image   # stand-in slot. Real Goose image = ghcr.io/block/goose + wiring — see ../README.md "Running against real Kagent / Goose (path B)"
+          image: PLACEHOLDER-agent-image   # stand-in slot. Real Goose image = ghcr.io/block/goose + wiring (see README path B)
           env:
             - name: MCP_PROXY_URL
               value: "http://localhost:8080/v1/tool-call"
