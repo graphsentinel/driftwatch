@@ -55,17 +55,21 @@ kubectl -n driftwatch get adp             # AgentDriftPolicy (adp) — none yet
 
 ## 2. Apply a policy — shadow first, then enforce (NFR-5)
 
+There is one ready-to-run policy set in the demo; copy and adapt for your cluster
+(change `selector`, namespace, and `observability.otel.endpoint`):
+
 ```bash
 # shadow: scores and emits OTel, blocks nothing — build trust
-kubectl apply -f config/policies/shadow-mode.yaml
-kubectl get adp kagent-shadow -o jsonpath='{.status}{"\n"}'   # baselineReady, observedTaskTypes
+kubectl apply -f examples/k3d-cluster-demo/manifests/agentdriftpolicy-shadow.yaml
+kubectl get adp demo-shadow -o jsonpath='{.status}{"\n"}'   # baselineReady, observedTaskTypes
 
 # once you trust the baseline, flip to enforcement
-kubectl apply -f config/policies/kagent-cluster-ops.yaml
+kubectl apply -f examples/k3d-cluster-demo/manifests/agentdriftpolicy-enforce.yaml
 ```
 
 `status` is written by the operator — you never set it. `action` is the one knob:
-`log` (shadow) → `drop`/`block` (enforce).
+`log` (shadow) → `drop`/`block` (enforce). Field reference: the CRD schema in
+[`crd/agentdriftpolicy.yaml`](crd/agentdriftpolicy.yaml).
 
 ## 3. Govern an agent pod (sidecar)
 

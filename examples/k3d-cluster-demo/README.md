@@ -51,8 +51,9 @@ kubectl apply -f manifests/agentdriftpolicy-enforce.yaml  # enforce (action: blo
 ```
 
 In shadow nothing is blocked, but every would-have-blocked decision shows up in OTel;
-enforce stops drift with a 403 before kube-apiserver. (For general, non-demo templates
-see [`../../config/policies/`](../../config/policies/).)
+enforce stops drift with a 403 before kube-apiserver. These manifests are the policy
+set — copy and adapt them for your own cluster (the CRD field reference is
+[`../../deploy/crd/agentdriftpolicy.yaml`](../../deploy/crd/agentdriftpolicy.yaml)).
 
 ## Tear down
 

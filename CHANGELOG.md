@@ -7,7 +7,7 @@ Each entry corresponds to one sprint commit.
 - Repo skeleton matching the CFP Repository Layout (`src/driftwatch/{library,sdk,adapters,db,graph,otel,operator,interceptor,crd}`, `config/`, `deploy/`, `evaluation/`, `examples/k3d-cluster-demo/`, `tests/`).
 - `pyproject.toml` (package `driftwatch` v0.1.0a0, optional extras: operator/interceptor/graph/dev).
 - `AgentDriftPolicy` CRD manifest (`deploy/crd/`) with OpenAPI v3 validation; `status` is a subresource (operator-written).
-- Sample policies: `kagent-cluster-ops` (enforce) + `shadow-mode` (log) under `config/policies/`.
+- Sample policies: `kagent-cluster-ops` (enforce) + `shadow-mode` (log) under `config/policies/`. *(later removed — the single policy set lives in `examples/k3d-cluster-demo/manifests/`; `config/` keeps only `otel-targets.yaml`.)*
 - `Makefile` (install/test/eval/cluster-up/obs-up/demo-1..5), `.gitignore`, CI workflow, README.
 
 ## S1 — Detection library

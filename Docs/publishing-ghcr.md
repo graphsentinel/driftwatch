@@ -98,9 +98,9 @@ kubectl get crd agentdriftpolicies.driftwatch.graphsentinel.org
 kubectl -n driftwatch get pods
 
 # 3. apply a policy (shadow first, then enforce)
-kubectl apply -f https://raw.githubusercontent.com/graphsentinel/driftwatch/main/config/policies/shadow-mode.yaml
+kubectl apply -f https://raw.githubusercontent.com/graphsentinel/driftwatch/main/examples/k3d-cluster-demo/manifests/agentdriftpolicy-shadow.yaml
 # ...watch OTel, then:
-kubectl apply -f https://raw.githubusercontent.com/graphsentinel/driftwatch/main/config/policies/kagent-cluster-ops.yaml
+kubectl apply -f https://raw.githubusercontent.com/graphsentinel/driftwatch/main/examples/k3d-cluster-demo/manifests/agentdriftpolicy-enforce.yaml
 
 # 4. govern an agent pod (manual sidecar path; webhook injector is roadmap)
 kubectl apply -f https://raw.githubusercontent.com/graphsentinel/driftwatch/main/deploy/sidecar-manual.yaml

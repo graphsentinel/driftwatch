@@ -52,7 +52,7 @@ drive it with a policy:
 helm install driftwatch oci://ghcr.io/graphsentinel/charts/driftwatch --version 0.1.0 \
   --namespace driftwatch --create-namespace \
   --set otel.endpoint=host.k3d.internal:4317
-kubectl apply -f config/policies/shadow-mode.yaml      # shadow first, then enforce
+kubectl apply -f examples/k3d-cluster-demo/manifests/agentdriftpolicy-shadow.yaml  # shadow first, then enforce
 ```
 
 Full install, policy, sidecar, values, and troubleshooting → **[deploy/README.md](deploy/README.md)**.

@@ -1,8 +1,9 @@
 # Demo manifests
 
-Self-contained Kubernetes objects for the k3d demo. Demo-specific (k3d/host OTLP
-endpoint, `driftwatch` namespace) — for general, reusable templates see
-[`../../../config/policies/`](../../../config/policies/).
+Self-contained Kubernetes objects for the k3d demo, and the project's single policy
+set. Demo values are k3d-specific (host OTLP endpoint, `driftwatch` namespace) — copy
+and adapt for your own cluster. The CRD field reference is
+[`../../../deploy/crd/agentdriftpolicy.yaml`](../../../deploy/crd/agentdriftpolicy.yaml).
 
 | File | What |
 |---|---|

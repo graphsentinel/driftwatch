@@ -3,7 +3,7 @@
 # tune, then switch to agentdriftpolicy-enforce.yaml.
 #
 # Demo-specific (k3d): OTLP target is the podman-compose collector on the host.
-# General templates live in ../../../config/policies/.
+# This is the project's policy set — copy and adapt for your own cluster.
 apiVersion: driftwatch.graphsentinel.org/v1alpha1
 kind: AgentDriftPolicy
 metadata:
