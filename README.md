@@ -28,10 +28,11 @@ to Kyverno/OPA, not a replacement.
 | `src/driftwatch/otel/` | `gen_ai.agent.*` emission (Observability Summit semconv) |
 | `src/driftwatch/operator/` | Kopf control plane |
 | `src/driftwatch/interceptor/` | data-plane sidecar |
-| `config/` | sample policies, OTel targets/collector, seed models |
+| `config/` | general reference — `otel-targets.yaml` (the OTLP-endpoint / decoupling reference) |
 | `deploy/` | Helm chart + raw CRD manifest + [install guide](deploy/README.md) |
 | `evaluation/` | dataset + `make eval` harness |
-| `examples/k3d-cluster-demo/` | the five live demo scenarios |
+| `examples/k3d-cluster-demo/` | self-contained demo — compose, k3d/collector/prometheus config, `manifests/` (policies + agents), own `Makefile` |
+| `tests/` · `Docs/` | functional suite (TC-F-*) · architecture, adapter guide, FP-tuning, GHCR publishing |
 
 ## Quick start
 
@@ -41,7 +42,10 @@ make test             # run the functional suite (TC-F-*)
 make eval             # run the drift dataset → recall / FP-rate / p95
 ```
 
-See the [Makefile](Makefile) for cluster/demo targets.
+Project-wide targets live in the root [Makefile](Makefile) (`install`/`test`/`lint`/`eval`/`clean`).
+The k3d demo has its own [Makefile](examples/k3d-cluster-demo/Makefile)
+(`cluster-up`/`obs-up`/`deploy`/`demo-1..5`) — run from the demo dir or via
+`make -C examples/k3d-cluster-demo <target>`.
 
 ## Install (on a cluster)
 
