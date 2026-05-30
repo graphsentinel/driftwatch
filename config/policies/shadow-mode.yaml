@@ -1,0 +1,27 @@
+# Same as kagent-cluster-ops but action: log — the safe-by-default adoption on-ramp.
+# Scores and emits OTel, blocks nothing. Flip to `block` once you trust the baseline.
+apiVersion: driftwatch.graphsentinel.org/v1alpha1
+kind: AgentDriftPolicy
+metadata:
+  name: kagent-shadow
+spec:
+  selector:
+    matchLabels: { app: kagent }
+  runtimes:
+    - name: kagent
+      adapter: builtin/kagent
+  baseline:
+    sources: [approvedTraces, successfulRuns, dryRun]
+    aggregate: mean
+    window: 50
+  detection:
+    features: [tool, scope, sequence, argSchemaHash]
+    algorithm: streaming-zscore
+    threshold: 3.0
+  action: log
+  failurePolicy: failOpen
+  observability:
+    otel:
+      emitEvaluationOn: [baseline_deviation, danger_detected]
+      endpoint: "${DRIFTWATCH_OTLP_ENDPOINT:-otel-collector:4317}"
+      protocol: grpc

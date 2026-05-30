@@ -1,0 +1,30 @@
+apiVersion: driftwatch.graphsentinel.org/v1alpha1
+kind: AgentDriftPolicy
+metadata:
+  name: kagent-cluster-ops
+spec:
+  selector:
+    matchLabels: { app: kagent }
+  runtimes:
+    - name: kagent
+      adapter: builtin/kagent
+    - name: goose
+      adapter: builtin/goose
+  baseline:
+    sources:
+      - approvedTraces
+      - successfulRuns
+      - dryRun
+    aggregate: mean
+    window: 50
+  detection:
+    features: [tool, scope, sequence, argSchemaHash]
+    algorithm: streaming-zscore
+    threshold: 3.0
+  action: block
+  failurePolicy: failClosed
+  observability:
+    otel:
+      emitEvaluationOn: [baseline_deviation, danger_detected]
+      endpoint: "${DRIFTWATCH_OTLP_ENDPOINT:-otel-collector:4317}"
+      protocol: grpc
