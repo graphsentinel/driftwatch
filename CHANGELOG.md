@@ -35,3 +35,11 @@ Maps to: Implementation Plan S1; FR-2/FR-3; NFR-2; TC-D-*, TC-F-03/04/13.
 - `tests/test_operator_otel.py`: 7 tests — valid/invalid policies, model-seed, reconcile status, OTel schema conformance (TC-F-08: no drift.* keys, score on event in [0,1]). 16 total green.
 
 Maps to: Implementation Plan S2; FR-4/5/6/9; Constraints C1; TC-F-01/02/08.
+
+## S3 — Interceptor + runtime adapters
+- `adapters/`: built-in `kagent` + `goose` (both normalize to the same DecisionChain — one policy governs both) + `custom_example` (the `custom` adapter path, FR-8). Registered on import via the SDK registry.
+- `interceptor/engine.py`: transport-free `Interceptor` — normalize → score → enforce. Three actions: `log` (forward+flag), `drop` (silent 200 no-op), `block` (403 before kube-apiserver). Cold-start and exceptions fail to the declared `failurePolicy` (NFR-6). Emits the gen_ai.agent.* schema per call.
+- `interceptor/server.py`: FastAPI sidecar (`/v1/tool-call`, `/healthz`) over the engine; FastAPI/uvicorn optional.
+- `tests/test_interceptor_adapters.py`: 10 tests — kagent/goose same-shape, custom-by-name + builtin/ resolution, log/drop/block outcomes & status codes, happy-path forward, failClosed/failOpen resilience, cold-start failClosed. 26 total green.
+
+Maps to: Implementation Plan S3; FR-1/7/8; NFR-1/6; TC-F-05/06/07/09/10/11.
