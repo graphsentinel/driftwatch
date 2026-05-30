@@ -15,7 +15,7 @@ cluster-down:
 	k3d cluster delete driftwatch-demo
 
 # --- observability stack (podman-compose, decoupled) ---
-obs-up:         ## start OTel Collector + Jaeger + Prometheus + Grafana (+ Neo4j)
+obs-up:         ## start OTel Collector + Jaeger + Prometheus + Grafana (Neo4j: roadmap, --profile forensics)
 	podman-compose -f compose.yaml up -d
 
 obs-down:
