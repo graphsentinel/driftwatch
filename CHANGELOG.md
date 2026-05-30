@@ -63,3 +63,12 @@ Maps to: Implementation Plan S4; Benefits §1; NFR-5; TC-D-02..07 end-to-end.
 - `tests/test_eval_harness.py`: dataset shape, metric ranges, inverse-scaling computed (n≥20, β₁>0), summary renders. 37 total green.
 
 Maps to: Implementation Plan S5; NFR-3; inverse-scaling; abstract DATA-READY slot.
+
+## S6 — Polish
+- `Docs/fp-tuning-runbook.md`: the NFR-3 procedure — tune a false positive out via window/threshold/dryRun in shadow mode, then promote to block (the "one we got wrong" beat).
+- `Docs/adapter-guide.md`: how to write a runtime adapter against the SDK (FR-8) — ~10 lines, inherit all four-feature scoring + OTel emission.
+- `Docs/architecture.md`: implementation architecture, module map, the decision-not-API-object invariant, OTel C1 compliance.
+- `examples/k3d-cluster-demo/recordings/README.md`: asciinema fallback workflow for all five scenarios.
+- Full suite green (37) in ~/venv across all sprints.
+
+Maps to: Implementation Plan S6; NFR-3; FR-8; Constraints C1.
