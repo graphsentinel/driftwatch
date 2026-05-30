@@ -1,6 +1,10 @@
 {{- if .Values.crd.install }}
-# The AgentDriftPolicy CRD. Source of truth: deploy/crd/agentdriftpolicy.yaml
-# (kept in sync; templated here so `helm install` brings up the full contract).
+# The AgentDriftPolicy CRD. CANONICAL source: deploy/crd/agentdriftpolicy.yaml.
+# Helm's .Files.Get can only read inside the chart dir and `helm package` rejects
+# symlinks that point outside the chart, so the chart must keep a real copy here. The
+# two files are kept byte-identical and a test (tests/test_crd_sync.py) fails CI if they
+# ever drift. To change the CRD: edit deploy/crd/agentdriftpolicy.yaml, then
+# `cp deploy/crd/agentdriftpolicy.yaml deploy/helm/driftwatch/agentdriftpolicy.yaml`.
 {{- $crd := .Files.Get "agentdriftpolicy.yaml" }}
 {{- if $crd }}
 {{ $crd }}
