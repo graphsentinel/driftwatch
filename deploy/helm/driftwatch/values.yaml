@@ -1,0 +1,32 @@
+# DriftWatch Helm values (production defaults).
+image:
+  repository: ghcr.io/graphsentinel/driftwatch
+  tag: 0.1.0a0
+  pullPolicy: IfNotPresent
+
+operator:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 250m, memory: 256Mi }
+
+interceptor:
+  # injected as a sidecar into governed agent pods
+  port: 8080
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits:   { cpu: 100m, memory: 128Mi }
+
+# decoupled OTLP target — overridden per environment (see values-k3d.yaml)
+otel:
+  endpoint: otel-collector.observability.svc.cluster.local:4317
+  protocol: grpc
+
+crd:
+  install: true
+
+rbac:
+  create: true
+
+webhook:
+  enabled: true

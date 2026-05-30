@@ -43,3 +43,14 @@ Maps to: Implementation Plan S2; FR-4/5/6/9; Constraints C1; TC-F-01/02/08.
 - `tests/test_interceptor_adapters.py`: 10 tests — kagent/goose same-shape, custom-by-name + builtin/ resolution, log/drop/block outcomes & status codes, happy-path forward, failClosed/failOpen resilience, cold-start failClosed. 26 total green.
 
 Maps to: Implementation Plan S3; FR-1/7/8; NFR-1/6; TC-F-05/06/07/09/10/11.
+
+## S4 — Demo stack (Helm + k3d + podman-compose + five scenarios)
+- `cli.py`: `driftwatch demo <scenario>` runs all five scenarios through the real detection core (standalone — demo-safe, no cluster needed; identical in-cluster). Tiny SRE tool catalog (category/risk). `eval` subcommand wired to S5.
+- `examples/k3d-cluster-demo/`: `k3d-config.yaml` (cluster, host.k3d.internal), `compose.yaml` (OTel Collector + Jaeger + Prometheus + Grafana + Neo4j on podman-compose), `grafana-dashboard.json` (agent-decisions: gate.action, score.value p95, anomaly kinds, FP rate), README + DEMO_RUNBOOK (35-min beat sheet) + recordings/ placeholder.
+- `config/prometheus.yaml`: scrape the collector's drift metrics.
+- `deploy/helm/driftwatch/`: Chart + values + values-k3d (OTLP→host.k3d.internal) + templates (operator Deployment, RBAC ClusterRole/binding, CRD install). CRD vendored into the chart.
+- `make demo-1..5` / `cluster-up` / `obs-up` / `deploy` all wired.
+- `tests/test_cli_demos.py`: all five scenarios pass with correct anomaly.kind + action (tool→baseline_mismatch/block, scope→scope_creep/block, sequence→blocked_transition/drop, arg→arg_schema_novel/block, storm→drop). 33 total green.
+- Fix: demo interceptor shares the baseline's tool catalog so category/risk match (prevents spurious risk-escalation); sequence drift attributed to the destination tool.
+
+Maps to: Implementation Plan S4; Benefits §1; NFR-5; TC-D-02..07 end-to-end.

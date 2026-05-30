@@ -1,0 +1,8 @@
+{{- if .Values.crd.install }}
+# The AgentDriftPolicy CRD. Source of truth: deploy/crd/agentdriftpolicy.yaml
+# (kept in sync; templated here so `helm install` brings up the full contract).
+{{- $crd := .Files.Get "agentdriftpolicy.yaml" }}
+{{- if $crd }}
+{{ $crd }}
+{{- end }}
+{{- end }}

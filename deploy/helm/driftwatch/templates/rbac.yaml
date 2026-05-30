@@ -1,0 +1,34 @@
+{{- if .Values.rbac.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: driftwatch-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: driftwatch-operator
+rules:
+  - apiGroups: ["driftwatch.graphsentinel.org"]
+    resources: ["agentdriftpolicies", "agentdriftpolicies/status"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: driftwatch-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: driftwatch-operator
+subjects:
+  - kind: ServiceAccount
+    name: driftwatch-operator
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,0 +1,20 @@
+# k3d cluster for the DriftWatch demo (make cluster-up).
+# host.k3d.internal resolves to the host, where the podman-compose observability
+# stack listens on :4317 — that is the decoupled OTLP target (config/otel-targets.yaml).
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: driftwatch-demo
+servers: 1
+agents: 1
+image: rancher/k3s:v1.29.4-k3s1
+ports:
+  - port: 8080:80
+    nodeFilters: [loadbalancer]
+options:
+  k3d:
+    wait: true
+  k3s:
+    nodeLabels:
+      - label: driftwatch.io/demo=true
+        nodeFilters: [server:0]

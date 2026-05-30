@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftwatch-operator
+  labels: { app.kubernetes.io/name: driftwatch, app.kubernetes.io/component: operator }
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: driftwatch, app.kubernetes.io/component: operator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: driftwatch, app.kubernetes.io/component: operator }
+    spec:
+      serviceAccountName: driftwatch-operator
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["driftwatch-operator"]
+          env:
+            - name: DRIFTWATCH_OTLP_ENDPOINT
+              value: "{{ .Values.otel.endpoint }}"
+          resources: {{- toYaml .Values.operator.resources | nindent 12 }}

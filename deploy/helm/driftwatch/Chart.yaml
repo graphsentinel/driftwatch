@@ -1,0 +1,10 @@
+apiVersion: v2
+name: driftwatch
+description: Kubernetes operator that catches AI-agent decision drift before the API
+type: application
+version: 0.1.0
+appVersion: "0.1.0a0"
+keywords: [ai-agents, drift, governance, opentelemetry, kagent, goose]
+home: https://github.com/graphsentinel/driftwatch
+sources:
+  - https://github.com/graphsentinel/driftwatch
