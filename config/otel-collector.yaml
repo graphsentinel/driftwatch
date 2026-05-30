@@ -1,0 +1,32 @@
+# OTel Collector pipeline: receive the gen_ai.agent.* schema over OTLP and fan out to
+# the observability stack (Jaeger / Prometheus / Neo4j / Grafana). Runs in
+# podman-compose alongside the cluster; DriftWatch only pushes OTLP to it (the endpoint
+# the cluster targets is in config/otel-targets.yaml).
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4318 }
+
+processors:
+  batch: {}
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls: { insecure: true }
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus, debug]
