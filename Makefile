@@ -1,5 +1,4 @@
-.PHONY: install test lint eval cluster-up cluster-down obs-up obs-down \
-        demo-1 demo-2 demo-3 demo-4 demo-5 deploy clean
+.PHONY: install test lint eval clean demo
 
 PY ?= python3
 
@@ -16,29 +15,12 @@ lint:
 eval:           ## run drift dataset -> recall / FP-rate / p95 / inverse-scaling
 	$(PY) -m driftwatch.cli eval --dataset evaluation/datasets/drift.jsonl
 
-# --- demo cluster (k3d) ---
-cluster-up:     ## create the k3d demo cluster
-	k3d cluster create -c examples/k3d-cluster-demo/k3d-config.yaml
-
-cluster-down:
-	k3d cluster delete driftwatch-demo
-
-# --- observability stack (podman-compose, decoupled) ---
-obs-up:         ## start OTel Collector + Jaeger + Prometheus + Grafana (+ Neo4j)
-	podman-compose -f examples/k3d-cluster-demo/compose.yaml up -d
-
-obs-down:
-	podman-compose -f examples/k3d-cluster-demo/compose.yaml down
-
-deploy:         ## helm install DriftWatch into the current cluster
-	helm install driftwatch deploy/helm/driftwatch -f deploy/helm/driftwatch/values-k3d.yaml
-
-# --- the five live scenarios ---
-demo-1:; $(PY) -m driftwatch.cli demo tool_substitution
-demo-2:; $(PY) -m driftwatch.cli demo scope_escalation
-demo-3:; $(PY) -m driftwatch.cli demo sequence_inversion
-demo-4:; $(PY) -m driftwatch.cli demo argument_injection
-demo-5:; $(PY) -m driftwatch.cli demo retry_storm
-
 clean:
 	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .ruff_cache .mypy_cache
+
+# --- demo ---
+# The k3d demo has its own Makefile (cluster-up / obs-up / deploy / demo-1..5):
+#   make -C examples/k3d-cluster-demo <target>
+# `make demo` is a shortcut for the standalone five-scenario run (no cluster needed).
+demo:           ## run all five drift scenarios standalone (delegates to the demo Makefile)
+	$(MAKE) -C examples/k3d-cluster-demo demo-all

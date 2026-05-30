@@ -22,7 +22,7 @@ scenarios, on **Kagent + Goose**, live on Grafana.
    - demo-4 argument injection → block
    - demo-5 retry storm → drop (Goose)
 6. **24:00 The one we got wrong** — show a false positive; tune `threshold`/`window`; it stops blocking. FP rate panel drops.
-7. **27:00 Inverse scaling** — `make eval`: bigger model didn't drift less (β₁ > 0).
+7. **27:00 Inverse scaling** — `make -C ../.. eval` (root target): bigger model didn't drift less (β₁ > 0).
 8. **30:00 Takeaways** — operator + Helm + CRD + the `gen_ai.agent.*` schema; Apache-2.0.
 9. **32:00 Q&A**
 

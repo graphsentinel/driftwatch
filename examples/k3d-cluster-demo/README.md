@@ -5,10 +5,14 @@ k3d cluster; the observability stack (Jaeger / Prometheus / Grafana / Neo4j) run
 podman-compose on the host. They are decoupled — DriftWatch only pushes OTLP to
 `host.k3d.internal:4317`.
 
+> `make` targets below are this directory's [Makefile](Makefile). Project-wide targets
+> (`install`, `test`, `lint`, `eval`) live in the root Makefile — run as
+> `make -C ../.. <target>`.
+
 ## One-time
 
 ```bash
-make install            # editable install into your env
+make -C ../.. install    # editable install into your env (root Makefile)
 ```
 
 ## Bring it up
@@ -17,6 +21,7 @@ make install            # editable install into your env
 make obs-up             # podman-compose: OTel Collector + Jaeger + Prometheus + Grafana (+ Neo4j)
 make cluster-up         # k3d cluster (driftwatch-demo)
 make deploy             # helm install DriftWatch with values-k3d.yaml
+# (or: make up   — all three at once)
 ```
 
 - Grafana: http://localhost:3000  (dashboard: *DriftWatch — agent-decisions*)

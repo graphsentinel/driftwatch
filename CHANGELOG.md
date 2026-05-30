@@ -49,7 +49,7 @@ Maps to: Implementation Plan S3; FR-1/7/8; NFR-1/6; TC-F-05/06/07/09/10/11.
 - `examples/k3d-cluster-demo/`: `k3d-config.yaml` (cluster, host.k3d.internal), `compose.yaml` (OTel Collector + Jaeger + Prometheus + Grafana + Neo4j on podman-compose), `grafana-dashboard.json` (agent-decisions: gate.action, score.value p95, anomaly kinds, FP rate), README + DEMO_RUNBOOK (35-min beat sheet) + recordings/ placeholder.
 - `config/prometheus.yaml`: scrape the collector's drift metrics. *(later moved to `examples/k3d-cluster-demo/` — demo-specific.)*
 - `deploy/helm/driftwatch/`: Chart + values + values-k3d (OTLP→host.k3d.internal) + templates (operator Deployment, RBAC ClusterRole/binding, CRD install). CRD vendored into the chart.
-- `make demo-1..5` / `cluster-up` / `obs-up` / `deploy` all wired.
+- `make demo-1..5` / `cluster-up` / `obs-up` / `deploy` all wired. *(later split into a demo-local Makefile under `examples/k3d-cluster-demo/`; the root Makefile keeps only project-wide targets install/test/lint/eval/clean + a `demo` shortcut.)*
 - `tests/test_cli_demos.py`: all five scenarios pass with correct anomaly.kind + action (tool→baseline_mismatch/block, scope→scope_creep/block, sequence→blocked_transition/drop, arg→arg_schema_novel/block, storm→drop).
 - Fix: demo interceptor shares the baseline's tool catalog so category/risk match (prevents spurious risk-escalation); sequence drift attributed to the destination tool.
 
