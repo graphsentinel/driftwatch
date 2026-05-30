@@ -82,3 +82,11 @@ Five findings from the implementation review, all closed:
 - **Eval honesty:** `summary()` now prints "seed-validation numbers — do NOT use for the CFP headline" instead of "fill DATA-READY slot".
 
 Suite: 28 passed; ruff clean; helm renders.
+
+## S6.2 — GHCR publishing
+- `Dockerfile`: multi-stage (build wheel → slim runtime); installs `[operator,interceptor]` extras; non-root; one image, two entrypoints (`driftwatch-operator` default, `driftwatch-interceptor` for the sidecar). Verified: `docker build` succeeds, all three console scripts resolve, deps import.
+- `.dockerignore`: keep the image lean (no tests/docs/data/examples).
+- `.github/workflows/release.yml`: build + push to `ghcr.io/<owner>/driftwatch` on main and `v*` tags, using the built-in `GITHUB_TOKEN` (packages: write) — no PAT.
+- `Docs/publishing-ghcr.md`: automated (Actions) and manual push paths, plus the one-time "make package public" step.
+
+Maps to: the cluster-deployable gap called out in the review — image now builds and has a publish path.
