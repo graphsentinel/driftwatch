@@ -56,11 +56,20 @@ kubectl -n "$NS" exec "$OP_POD" -- sh -c 'ls -l /data/baselines/driftwatch.db' |
 
 echo "== 3. launch the interceptor pod on the operator's node (RWO PVC) =="
 kubectl -n "$NS" delete pod fr10-e2e-interceptor --ignore-not-found --now >/dev/null 2>&1 || true
-# inject nodeName so the pod lands on the operator's node and can mount the same PVC
-kubectl -n "$NS" apply -f "$POD_MANIFEST" >/dev/null
-kubectl -n "$NS" patch pod fr10-e2e-interceptor --type merge \
-  -p "{\"spec\":{\"nodeName\":\"$OP_NODE\"}}" >/dev/null 2>&1 || true
-echo "waiting for interceptor readiness..."
+# Bind nodeName BEFORE apply: patching a pod after apply races the scheduler — if it binds
+# the pod to another node first, the RWO PVC (k3d local-path/hostPath) is stuck on the
+# operator's node and the pod never schedules. Inject nodeName into a temp manifest so the
+# pod is created already pinned. (`spec.nodeName` is immutable, so post-apply patch is also
+# rejected once bound.)
+TMP_MANIFEST=$(mktemp --suffix=.yaml)
+trap 'rm -f "$TMP_MANIFEST"' EXIT
+awk -v node="$OP_NODE" '
+  /^spec:/ && !done { print; print "  nodeName: " node; done=1; next }
+  { print }
+' "$POD_MANIFEST" > "$TMP_MANIFEST"
+grep -q "nodeName: $OP_NODE" "$TMP_MANIFEST" || { echo "ERROR: failed to inject nodeName"; exit 1; }
+kubectl -n "$NS" apply -f "$TMP_MANIFEST" >/dev/null
+echo "waiting for interceptor readiness (pinned to $OP_NODE)..."
 kubectl -n "$NS" wait --for=condition=Ready pod/fr10-e2e-interceptor --timeout=90s
 
 echo "== 4. probe the live /v1/tool-call hop =="

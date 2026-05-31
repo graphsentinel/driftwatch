@@ -2,6 +2,10 @@
 image:
   repository: ghcr.io/graphsentinel/driftwatch
   tag: 0.1.0a0
+  # For reproducible review/demo installs, pin an immutable digest instead of the tag:
+  # set image.digest to "sha256:..." and the operator renders repository@digest, ignoring
+  # the tag. Empty = track the tag. See Docs/publishing-ghcr.md (release immutability).
+  digest: ""
   pullPolicy: IfNotPresent
 
 # Hardened by default (NFR-9). The image is already non-root (uid 10001); these enforce
