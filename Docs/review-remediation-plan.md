@@ -8,7 +8,7 @@ Severity from the review: **C** critical, **I** important, **M** minor.
 
 ---
 
-## R1 (C) — Control-plane → data-plane handoff  ·  FR-10  ·  E8
+## R1 (C) — Control-plane → data-plane handoff  ·  FR-10  ·  RE1
 
 **Finding.** Operator keeps the baseline in its own `Reconciler` store
 (`operator/reconcile.py:14`); the sidecar starts with an empty `BaselineStore()`
@@ -20,7 +20,7 @@ running governance" is not closed end-to-end.
 baseline for its task types: action, threshold, failurePolicy, and the baseline snapshot
 are delivered to the sidecar — not hard-coded or empty.
 
-**E8 — Reconciled enforcement (control↔data handoff).**
+**RE1 — Reconciled enforcement (control↔data handoff).**
 - **US-8.1** — *As a platform engineer, the sidecar enforces the SAME policy + baseline
   the operator reconciled, so a drift is judged against learned normal, not an empty store.*
 - **Tasks**
@@ -66,7 +66,7 @@ stop implying a live real-Kagent deployment.
 
 ---
 
-## R3 (C) — CI doesn't test the runtime surface  ·  NFR-7  ·  E9
+## R3 (C) — CI doesn't test the runtime surface  ·  NFR-7  ·  RE2
 
 **Finding.** CI runs `pip install -e ".[dev]"` (`ci.yml:15`), but `dev` lacks
 kopf/fastapi/httpx (`pyproject.toml:23`), so runtime tests `importorskip`-skip silently
@@ -76,7 +76,7 @@ operator/interceptor runtime.
 **NFR-7 (new).** CI MUST exercise the operator + interceptor runtime, not just pure
 library; skipped runtime tests MUST fail the build.
 
-**E9 — CI runtime coverage** (small).
+**RE2 — CI runtime coverage** (small).
 - **T9.1** — CI installs `.[all]` (or add runtime deps to `dev`).
 - **T9.2** — Fail on unexpected skips (`-W error` / `--strict-markers` + an assert that
   the kopf/fastapi tests actually ran in CI).
@@ -128,7 +128,7 @@ Default recommendation: **(b)** for v1alpha1 (cheap, honest), **(a)** as a roadm
 
 ---
 
-## R6 (I) — Baseline poisoning  ·  NFR-8 (security)  ·  E8
+## R6 (I) — Baseline poisoning  ·  NFR-8 (security)  ·  RE1
 
 **Finding.** `fold()` adds every chain it sees to "normal" (`baseline.py:41`); a drifting
 chain folded in poisons the baseline. The consensus plan already flags this
@@ -146,7 +146,7 @@ auto-fold.
 
 ---
 
-## R7 (I) — Production security context  ·  NFR-9  ·  E9
+## R7 (I) — Production security context  ·  NFR-9  ·  RE2
 
 **Finding.** Dockerfile is non-root (`Dockerfile:18`) but the K8s template has no
 `securityContext` (`operator.yaml:13`): no runAsNonRoot / readOnlyRootFilesystem /
@@ -214,12 +214,12 @@ template. Provenance mandatory.
 
 ## Sequencing (code order, after this plan)
 **Cheap honesty/hardening first, big integration last:**
-1. **R3** (CI `.[all]` + no-skip) — makes every later change actually tested. *(E9)*
-2. **R7** (securityContext) + **R10a** (buckets) — small Helm/emit fixes. *(E9)*
+1. **R3** (CI `.[all]` + no-skip) — makes every later change actually tested. *(RE2)*
+2. **R7** (securityContext) + **R10a** (buckets) — small Helm/emit fixes. *(RE2)*
 3. **R5(b)** + **R2** + inverse-scaling wording — CFP/docstring/demo honesty (no big code).
 4. **R4** (feature mask) — contained `score_chain` change. *(FR-2)*
 5. **R6** (poisoning guard) — baseline source-trust. *(NFR-8)*
-6. **R1** (operator→sidecar handoff + e2e) — the headline gap. *(E8, biggest)*
+6. **R1** (operator→sidecar handoff + e2e) — the headline gap. *(RE1, biggest)*
 7. **R8** (PVC), **R9** (consensus granularity), **R10b** (RBAC) — prod depth.
 
 Each step: code → test (no skips) → commit. R1 is the largest and lands after the cheap
@@ -230,5 +230,6 @@ wins so it's exercised by a CI that actually runs the runtime.
 ### New identifiers introduced (no collisions with the CFP)
 - Requirements: **FR-10** (handoff), **NFR-7** (CI runtime), **NFR-8** (poisoning),
   **NFR-9** (securityContext), **NFR-10** (persistence); **FR-2** amended (feature mask).
-- Epics: **E8** (reconciled enforcement + poisoning guard), **E9** (CI + hardening).
+- Remediation epics (separate from the CFP's E1–E7 to avoid confusion): **RE1**
+  (reconciled enforcement + poisoning guard), **RE2** (CI + hardening).
 - Test cases: **TC-F-20..28** (E7 already owns 16/17; consensus 18/19).
