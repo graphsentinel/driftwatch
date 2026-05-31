@@ -127,5 +127,50 @@ def test_http_tool_call_forwards_within_baseline():
     assert r.json()["outcome"] == "forward"
 
 
+# --- control->data-plane handoff (FR-10 / R1) ---
+
+def test_sidecar_loads_reconciled_baseline_and_policy(tmp_path, monkeypatch):  # TC-F-20
+    """The sidecar must enforce the operator-reconciled baseline + policy, not an empty
+    store with hard-coded defaults."""
+    from driftwatch.db.sqlite import SqliteBackend
+    from driftwatch.interceptor.main import build_default_interceptor
+
+    # operator side: reconcile a baseline and persist it to the shared store
+    monkeypatch.setenv("DRIFTWATCH_DATA_DIR", str(tmp_path))
+    store = SqliteBackend().load(window=50)
+    for _ in range(3):
+        c = DecisionChain(task_type="investigate_latency")
+        c.add(ToolCall(tool="QueryMetrics", scope="ns/a", category="observability"))
+        c.add(ToolCall(tool="QueryLogs", scope="ns/a", category="observability"))
+        store.fold(c)
+    SqliteBackend().save(store)
+
+    # operator delivers the policy knobs via env
+    monkeypatch.setenv("DRIFTWATCH_ACTION", "block")
+    monkeypatch.setenv("DRIFTWATCH_THRESHOLD", "3.0")
+    monkeypatch.setenv("DRIFTWATCH_FEATURES", "tool,scope,sequence,argSchemaHash")
+
+    # sidecar side: build from env — must NOT be empty
+    itc = build_default_interceptor()
+    assert "investigate_latency" in itc.store.task_types()  # loaded, not empty
+    assert itc.action == "block" and itc.threshold == 3.0
+
+    # and it enforces against that baseline: a drifting call is blocked
+    itc.adapter = KagentAdapter(task_type="investigate_latency")
+    itc.adapter.observe({"tool": "QueryMetrics", "namespace": "a"})
+    v = itc.handle({"tool": "DeleteNamespace", "namespace": "a"})
+    assert v.outcome == BLOCK and v.http_status == 403
+
+
+def test_sidecar_cold_start_when_no_store(monkeypatch):  # FR-10 cold-start path
+    from driftwatch.interceptor.main import build_default_interceptor
+    for k in ["DRIFTWATCH_DATA_DIR", "DRIFTWATCH_ACTION", "DRIFTWATCH_THRESHOLD",
+              "DRIFTWATCH_FEATURES", "DRIFTWATCH_FAILURE_POLICY"]:
+        monkeypatch.delenv(k, raising=False)
+    itc = build_default_interceptor()
+    assert itc.store.task_types() == []          # empty store, no crash
+    assert itc.action == "block" and itc.failure_policy == "failClosed"  # safe defaults
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))

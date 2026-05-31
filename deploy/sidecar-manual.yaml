@@ -37,8 +37,31 @@ spec:
           env:
             - name: DRIFTWATCH_OTLP_ENDPOINT
               value: "host.k3d.internal:4317"
+            # Control->data-plane handoff (FR-10): the sidecar enforces the operator-
+            # reconciled policy + baseline. The operator writes the baseline snapshot to
+            # the shared data dir; these knobs deliver the reconciled policy.
+            - name: DRIFTWATCH_DATA_DIR
+              value: "/data"                  # operator-written baseline snapshot
+            - name: DRIFTWATCH_ACTION
+              value: "block"                  # log | drop | block (match the policy)
+            - name: DRIFTWATCH_THRESHOLD
+              value: "3.0"
+            - name: DRIFTWATCH_FAILURE_POLICY
+              value: "failClosed"             # failOpen | failClosed
+            - name: DRIFTWATCH_FEATURES
+              value: "tool,scope,sequence,argSchemaHash"
+          volumeMounts:
+            - name: driftwatch-baseline
+              mountPath: /data
+              readOnly: true                  # sidecar reads; the operator owns writes
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits:   { cpu: 100m, memory: 128Mi }
+      volumes:
+        # Share the operator-written baseline into the sidecar. In v1alpha1 wire this to
+        # the same store the operator persists (e.g. a shared PVC, NFR-10); an emptyDir
+        # here only yields a cold-start (empty) baseline until that store is mounted.
+        - name: driftwatch-baseline
+          emptyDir: {}
