@@ -7,7 +7,9 @@ approach (Option B) and a recommendation.
 
 Both reuse the detection core unchanged: `Interceptor.handle(dict) -> Verdict`, scoring a
 decision chain against the operator-reconciled baseline (FR-10 shared store). The question
-is only **who owns the MCP transport** and **how DriftWatch is invoked**.
+is only **who owns the MCP transport** and **how DriftWatch is invoked** — and, decisively,
+**where DriftWatch's stateful decision-chain model lives** (DriftWatch's core thesis is
+chain-aware governance, not per-call authorization).
 
 ---
 
@@ -29,13 +31,17 @@ ToolServer, return an MCP error on block.
 **Pros**
 - No dependency on agentgateway — DriftWatch is self-contained.
 - Full control of the wire behavior.
+- **DriftWatch sees the whole MCP session**, so per-session decision-chain state lives
+  exactly where the thesis needs it — at the hop, in DriftWatch. This is the cleanest home
+  for chain-aware enforcement and is the strongest reason to keep A as the reference path.
 
 **Cons**
 - **We re-implement MCP transport** — JSON-RPC framing, `tools/list` passthrough, upstream
   forwarding, and (for real Kagent) MCP Streamable-HTTP: SSE streaming + session lifecycle.
-  That's the fragile, easy-to-get-subtly-wrong surface, and it's not DriftWatch's value.
-- DriftWatch has to masquerade as a ToolServer/proxy and stay current with the MCP spec.
-- Duplicates what a purpose-built agentic proxy already does.
+  That surface is real work and easy to get subtly wrong; it is not DriftWatch's value-add.
+  (Mitigated by the pure-mapping split — the fiddly JSON-RPC↔engine bit is unit-testable —
+  and by scoping v1alpha1 to the JSON-RPC-over-POST core, deferring SSE/session polish.)
+- DriftWatch has to present as a ToolServer/proxy and track the MCP spec over time.
 
 ---
 
@@ -48,37 +54,41 @@ Kagent agent pod ──MCP──> agentgateway ──MCP──> real MCP ToolSer
                                   HTTP 200 = allow, non-2xx = deny
 ```
 
-agentgateway is Kagent's own AI-native proxy (MCP/A2A) and supports **External
-Authorization**: for each request it calls an external service and **allows on HTTP 2xx,
-denies otherwise** (it is API-compatible with the Envoy ext_authz model, and has an
-MCP-aware authz path that evaluates `call_tools` invocations).
+agentgateway is an AI-native MCP/A2A gateway that can sit in front of Kagent tool traffic;
+it supports **External Authorization** — for each request it calls an external service and
+**allows on HTTP 2xx, denies otherwise** (API-compatible with the Envoy ext_authz model,
+with an MCP-aware authz path that evaluates `call_tools` invocations). *(The exact
+deployment relationship to Kagent — waypoint/ingress/mesh — should be confirmed against
+current docs rather than asserted here.)*
 
-**Key fit:** DriftWatch's *existing* `/v1/tool-call` endpoint already returns **200 for
-forward and 403 for block** — i.e. it is already an ext_authz-shaped allow/deny service.
-agentgateway owns all MCP transport; DriftWatch only answers "allow this tool call?".
+**Partial fit:** DriftWatch's *existing* `/v1/tool-call` endpoint already returns **200 for
+forward and 403 for block**, so the allow/deny *semantics* line up. But the ext_authz
+*envelope* (request body shape, headers, caller identity, timeout semantics) will differ
+from DriftWatch's current request shape, so this is a **thin adapter**, not a free match.
 
-**What we'd build:** almost nothing new in DriftWatch — adapt/confirm the `/v1/tool-call`
-contract matches what agentgateway's HTTP ext_authz sends (tool name + arguments in the
-body), plus deploy wiring (an agentgateway config that points ext_authz at the DriftWatch
-Service) + an example. The drift logic, baseline, FR-10 handoff are all reused as-is.
+**What we'd build:** a thin request-adapter so `/v1/tool-call` accepts the ext_authz body
+agentgateway sends (tool name + arguments, identity headers), plus deploy wiring (an
+agentgateway config pointing ext_authz at the DriftWatch Service) + an example. The drift
+logic, baseline, and FR-10 handoff are reused as-is.
 
 **Pros**
-- **Minimal new code** — no MCP transport in DriftWatch; the mature proxy handles framing,
+- **Much less new code** — no MCP transport in DriftWatch; the mature proxy handles framing,
   streaming, sessions, `tools/list`.
-- agentgateway is the *native, supported* place to govern Kagent tool calls — architecturally
-  honest ("we plug into the agent gateway as a drift authorizer"), not a bolt-on proxy.
+- A natural **production deployment pattern**: govern Kagent tool calls at the gateway the
+  platform already runs, instead of inserting a bespoke proxy.
 - Consistent with the earlier "don't open a separate fragile surface" calls (e.g. deferring
   the admission webhook).
-- Reuses the already-tested 200/403 endpoint → most of E7 becomes config + an e2e.
+- Reuses the already-tested 200/403 decision path → most of E7 becomes config + an adapter.
 
 **Cons**
 - Adds a runtime dependency on agentgateway (must be installed in the path-B cluster).
-- The **chain-state nuance** (below) — ext_authz is invoked per single tool call, but
-  DriftWatch scores ordered *chains*.
+- **Chain-state is the open risk** (below). ext_authz is per single tool call; DriftWatch's
+  whole point is ordered-chain drift. B only preserves the thesis *if* agentgateway forwards
+  a stable correlation key — unproven until a spike confirms it.
 
 ---
 
-## The chain-state nuance (applies to both, sharper in B)
+## The chain-state nuance (applies to both, decisive for B)
 
 DriftWatch scores a **decision chain** (ordered sequence of tool calls per task), not just
 one isolated tool. In a per-call authorization hop, each call arrives separately, so
@@ -88,45 +98,58 @@ its adapter — so single-process accumulation exists; what E7 needs is to **key
 caller** so two concurrent agents don't share one chain.
 
 - **Option A:** DriftWatch sees the whole MCP session, so it can hold per-session chain
-  state itself.
+  state itself. Chain-aware enforcement is native.
 - **Option B:** agentgateway must pass a stable correlation id (session/agent) in the
-  ext_authz request so DriftWatch can bucket calls into the right chain. Need to confirm
-  agentgateway forwards an MCP session id / identity to the ext_authz call; if not, fall
-  back to per-(agent,task) keying from the request, or score per-call features only (tool,
-  scope, argSchema) at the hop and keep sequence scoring for the trace/postmortem.
-
-This is the one real design item to resolve for B and must be verified against agentgateway's
-ext_authz request contract before implementing.
+  ext_authz request so DriftWatch can bucket calls into the right chain. This **must be
+  confirmed** against agentgateway's ext_authz request contract before B can be primary.
+  - If it forwards the raw `tools/call` body **and** a stable session/agent/task key → B
+    preserves chain-aware governance and is a strong production pattern.
+  - If it does not, the fallback is **per-call features only** (tool, scope, argSchema) at
+    the hop, with sequence/chain drift relegated to the trace/postmortem. **This is a
+    degraded mode, not sufficient for E7 success** — it removes DriftWatch's most
+    distinctive capability (sequence/chain drift) from runtime enforcement, so it cannot be
+    accepted as the E7 outcome; it would only be a stopgap while the correlation gap is
+    closed.
 
 ---
 
 ## Recommendation
 
-**Pursue Option B (agentgateway + DriftWatch ext_authz) as the primary path**, keep Option A
-documented as the fallback. Rationale: B keeps DriftWatch focused on its actual value (drift
-detection), reuses the already-tested 200/403 contract, and lets a mature, Kagent-native
-proxy own the transport — far less fragile than re-implementing MCP. The cost is one
-dependency + resolving chain correlation.
+**Keep Option A as the reference implementation path for E7**, because it preserves
+DriftWatch's stateful decision-chain model directly at the MCP hop — which is the thesis E7
+exists to prove. **Treat Option B (agentgateway + ext_authz) as a production deployment
+pattern**, gated on a spike proving that agentgateway forwards the raw `tools/call` body
+**plus** a stable session/agent/task correlation key. If the spike passes, B becomes the
+recommended *production* topology while A remains the reference that demonstrates chain-aware
+enforcement end-to-end.
+
+Rationale for not making B primary yet: the choice is a product-thesis decision, not a
+lines-of-code decision. B is less code, but until the correlation key is proven it cannot be
+shown to preserve chain-aware drift — and that is precisely what makes DriftWatch more than a
+per-call tool allowlist. We do not let "minimal code" pick the architecture for the core
+capability.
 
 **Sequencing (revised):**
-1. Confirm agentgateway's HTTP ext_authz request contract — does the body carry the MCP
-   tool name + arguments, and is there a session/identity field for chain correlation?
-   (doc/spec check; no cluster needed.)
-2. Make `/v1/tool-call` accept whatever shape agentgateway sends (a thin request-adapter if
-   needed) — pure, unit-testable, no agentgateway required.
-3. Chain correlation: key chains by the forwarded session/agent id (or document the per-call
-   fallback). Unit-tested.
-4. Deploy wiring: an agentgateway config + DriftWatch Service example, and an e2e — gated on
-   agentgateway being installed (you indicated it isn't yet, so steps 1–3 are the work now;
-   step 4 is later).
+1. **Spike — agentgateway ext_authz contract** (doc/spec, no cluster): does the request body
+   carry the MCP tool name + arguments, and is there a stable session/agent/task field for
+   chain correlation? This spike is the decision gate for B's status.
+2. **Reference path (A) core** — the pure JSON-RPC↔engine mapping (`to_engine_call`), pure
+   and unit-tested, no cluster. Useful to *both* options (B can reuse it if agentgateway
+   forwards the raw body).
+3. **A transport shell + chain keying** — `mcp_proxy.py` over the JSON-RPC-over-POST core,
+   per-session chain state; unit-tested with a stub upstream.
+4. **Live e2e** — A against a real Kagent + ToolServer; and, if the step-1 spike passed,
+   a B (agentgateway ext_authz) wiring + e2e. Both gated on the real cluster pieces being
+   available.
 
-Until agentgateway is available, the in-process `make demo` + path-A stand-in remain the
+Until those cluster pieces exist, the in-process `make demo` + path-A stand-in remain the
 deterministic demo, exactly as today.
 
 ---
 
-## What to keep from the paused Option-A draft
+## What carries across both options
 
-The pure mapping idea (MCP JSON-RPC ↔ engine dict) is reusable in B too if agentgateway is
-configured to forward the raw JSON-RPC body to ext_authz. So step 2 above can borrow the
-`to_engine_call` mapping from the Option-A draft regardless of which option ships.
+The pure mapping (MCP JSON-RPC ↔ engine dict) is reusable in B too if agentgateway is
+configured to forward the raw JSON-RPC body to ext_authz. So step 2 above (the `to_engine_call`
+mapping) is not wasted regardless of which topology ships — it is the shared seam between the
+reference proxy and the gateway pattern.
