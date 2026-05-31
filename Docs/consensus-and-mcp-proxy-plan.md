@@ -1,115 +1,121 @@
-# Plan — Consensus Baseline + MCP-Proxy Enforcement (E8 + E7)
+# Plan — Consensus Baseline (FR-9) + MCP-Proxy Enforcement (E7)
 
-Design-only (no code yet). Two linked epics that complete the "learn normal from a model
-panel, then police real Kagent against it" story:
+Design-only (no code yet). This is **not new scope** — both pieces are already in the CFP;
+this doc is the implementation plan for the parts that are specified but not yet coded:
 
-- **E8 — Consensus baseline seed**: build a per-task baseline from a *panel* of
-  open-source models, keeping only what the majority agree is normal.
-- **E7 — MCP-proxy enforcement (path B)**: score a real, Helm-installed Kagent's tool
-  calls against that baseline at the MCP hop (already sketched in the CFP; restated here
-  with the consensus link).
+- **Consensus baseline seed = FR-9**, already in the CFP: the CRD example shows
+  `sources: [..., {models: [qwen, gemma]}]` ("2+ models vote on the expected chain to seed
+  a baseline"), FR-9 defines it, and **TC-F-15** ("Model seed + handover") is its test.
+  What's missing is only the *producer* that turns those models' votes into the seed.
+- **MCP-proxy enforcement = E7** (CFP Epic E7, TC-F-13/14): score a real, Helm-installed
+  Kagent's tool calls against that baseline at the MCP hop.
 
-These reuse what already exists and are intentionally small additions:
-- `Policy.model_seed` already parses a `{models: [...]}` baseline source (FR-9).
-- `Reconciler.seed_from_models(expected_chains)` already folds seed chains — it just has
-  no producer today. E8 is that producer.
-- `library/baseline.py` `fold()` adds *every* tool it sees; consensus must filter
-  **before** folding, so a single model's hallucination never enters the baseline.
+Together they complete the "learn normal from a model panel, then police real Kagent
+against it" story — using scaffolding that already exists in the tree.
+
+What already exists (verified):
+- `Policy.model_seed` parses the `{models: [...]}` baseline source (FR-9 wiring).
+- `Reconciler.seed_from_models(expected_chains)` folds seed chains — but has **no
+  producer** today. The consensus builder below is that producer.
+- `library/baseline.py` `fold()` adds *every* tool it sees, so consensus must filter
+  **before** folding, or a single model's hallucination enters the baseline.
 
 ---
 
-## E8 — Consensus baseline seed
+## Part 1 — Consensus seed producer (implements FR-9)
 
 **Goal.** For each task type, ask N open-source models "what tool calls would you make?",
 collect their proposed chains, and distill a **majority** baseline: a tool (or scope, or
-transition) is "normal" only if ≥ a quorum of distinct models proposed it. One-model and
-minority proposals are dropped.
+transition) is "normal" only if a quorum of distinct models proposed it. Minority and
+single-model proposals are dropped, then the surviving consensus chain is folded via the
+existing `Reconciler.seed_from_models()`.
 
-**Why majority (the chosen design).** It is explainable on stage ("4 of 6 models agreed
-these five tools are how you investigate latency"), robust to a single model's
-hallucination, and maps cleanly onto the existing `fold()` — we fold ONE synthesized
-"consensus chain" per task rather than every raw chain.
-
-**Decided constraints.**
-- Consensus rule: **majority tool-set** — keep tools proposed by ≥ ⌈N/2⌉ distinct models.
-  (Sequence n-grams and scopes: keep a transition/scope if ≥ quorum models produced it.)
+**Chosen design (your decisions).**
+- Consensus rule: **majority tool-set** — keep tools proposed by ≥ ⌈N/2⌉ distinct models
+  (same quorum for scopes and sequence transitions). Not capability-weighted — majority,
+  so it does NOT contradict the inverse-scaling finding (bigger ≠ safer).
 - Execution: **offline CLI**, writes the baseline to the sqlite/JSON store the operator
-  loads. The operator pod never calls an LLM (clean separation, stage-safe, no network
-  dependency at reconcile time). Same `DRIFTWATCH_DATA_DIR` store the operator reads.
+  loads (`DRIFTWATCH_DATA_DIR`). The operator pod never calls an LLM — stage-safe, no
+  network dependency at reconcile time.
 - Models come from `Policy.model_seed` (the CRD `baseline.sources: [{models: [...]}]`).
 
 ### Tasks
-- **T8.1** — `consensus/runner.py`: an Ollama client (`OLLAMA_HOST`, default
-  `localhost:11434`). For each (task, model) ask for a tool-call list; parse the reply
-  into a `DecisionChain` via the existing adapters/fingerprint. Cloud-routed models
-  (`*-cloud`) and local models both work through the same `/api/generate`.
-- **T8.2** — `consensus/aggregate.py`: pure, cluster-free. Input: `{task -> {model ->
-  [chains]}}`. Output: one synthesized **consensus `DecisionChain`** per task containing
-  only majority tools/transitions/scopes. Quorum is configurable (default ⌈N/2⌉).
-  This is the only new detection logic and it is unit-testable without Ollama.
-- **T8.3** — `cli.py consensus-seed --policy <file> --out <dir>`: wire T8.1 → T8.2 →
-  `Reconciler.seed_from_models()`; persist the seeded store. Prints a per-task panel
-  table (which model proposed what, what survived quorum).
-- **T8.4** — Provenance: write `consensus_seed.json` (per task: models polled, raw
-  proposals, quorum, surviving tool-set) so the baseline is auditable — the same
-  "results/" discipline as eval.
-- **T8.5** — Honesty guard: if fewer than 2 models answer for a task, refuse to seed that
-  task (log it) rather than build a baseline from one voice.
+- **T-C1** — `consensus/runner.py`: Ollama client (`OLLAMA_HOST`, default
+  `localhost:11434`). For each (task, model) request a tool-call list; parse into a
+  `DecisionChain` via the existing adapter/fingerprint. Local and `*-cloud` models both
+  go through `/api/generate`.
+- **T-C2** — `consensus/aggregate.py`: pure, cluster-free, Ollama-free. Input
+  `{task -> {model -> [chains]}}` → one synthesized **consensus `DecisionChain`** per task
+  with only majority tools/transitions/scopes. The only new detection logic; fully
+  unit-testable. Quorum configurable (default ⌈N/2⌉).
+- **T-C3** — `cli.py consensus-seed --policy <file> --out <dir>`: wire T-C1 → T-C2 →
+  `Reconciler.seed_from_models()`; persist the seeded store; print a per-task panel table.
+- **T-C4** — Provenance: `consensus_seed.json` (per task: models polled, raw proposals,
+  quorum, surviving tool-set) — same "results/" audit discipline as eval.
+- **T-C5** — Honesty guard: if < 2 models answer for a task, refuse to seed it (log) rather
+  than build a baseline from one voice.
 
 ### Definition of Done
 - [ ] `consensus-seed` against a panel (e.g. `qwen3.5:4b`, `gemma4:31b-cloud`, + locals)
-      produces a baseline where a tool only one model proposed is **absent**, and a tool
-      the majority proposed is **present**.
-- [ ] `aggregate.py` has unit tests with synthetic proposals (no Ollama): quorum math,
+      yields a baseline where a one-model-only tool is **absent** and a majority tool is
+      **present**.
+- [ ] `aggregate.py` unit-tested with synthetic proposals (no Ollama): quorum math,
       minority drop, tie handling, single-model refusal.
-- [ ] The seeded store loads in the operator and `kubectl get adp` shows
-      `baselineReady: true` with the consensus task types.
+- [ ] The seeded store loads in the operator; `kubectl get adp` shows `baselineReady:true`
+      with the consensus task types — this is exactly **TC-F-15** end-to-end.
 - [ ] `consensus_seed.json` records provenance for every seeded task.
-- **Test Cases:** TC-F-15 (majority keep / minority drop), TC-F-16 (single-model refusal),
-  TC-F-17 (seeded store → operator baselineReady).
+- **Test Cases:** **TC-F-15** (model seed + handover — the existing CFP case, now
+  executable); **TC-F-16** (majority keep / minority drop); **TC-F-17** (single-model
+  refusal). *(TC-F-16/17 are currently "reserved" in the CFP table — this fills them.)*
 
 ### Gherkin
 ```gherkin
-Feature: Consensus baseline from a model panel
+Feature: Consensus baseline from a model panel (FR-9)
 
-  Scenario: A tool only one model proposes is excluded
+  Scenario: A tool only one model proposes is excluded          # TC-F-16
     Given 4 models proposing chains for task "investigate_latency"
     And only 1 of them proposes "DeleteNamespace"
     When the consensus baseline is built with majority quorum
     Then "DeleteNamespace" is NOT in the baseline's expected tools
     And tools proposed by >= 2 models ARE in the baseline
 
-  Scenario: Refuse to seed a task with too few voices
+  Scenario: Refuse to seed a task with too few voices           # TC-F-17
     Given only 1 model answered for task "rare_task"
     When consensus seeding runs
     Then "rare_task" is skipped (not seeded from a single model)
     And the skip is recorded in consensus_seed.json
+
+  Scenario: Seed then hand over to real runs                    # TC-F-15 (existing)
+    Given a baseline seeded from the model panel
+    When real successful runs accumulate in the window
+    Then real runs progressively replace the seed
 ```
 
 ---
 
-## E7 — MCP-proxy enforcement against the consensus baseline (path B)
+## Part 2 — E7 MCP-proxy enforcement against the consensus baseline (path B)
 
-(See the CFP E7 section for the full task list; this restates the seam to E8.)
+(Full task list lives in the CFP E7 section; this only restates the seam to FR-9.)
 
 Real Kagent is Helm-installed and controller-managed; its tool calls leave the agent pod
 over MCP Streamable HTTP to ToolServer pods. DriftWatch registers as an **MCP proxy** via
 Kagent's `RemoteMCPServer`, scores each `tools/call` with `Interceptor.handle()` against
-the **E8 consensus baseline**, and forwards survivors to the real ToolServer.
+the **FR-9 consensus baseline**, and forwards survivors to the real ToolServer.
 
-**The E8↔E7 seam:** E8 produces the baseline the E7 proxy reads. Same `BaselineStore`,
-same `score_chain` — E7 adds only the MCP transport shell (already specified in the CFP:
-`tools/list` passthrough, `tools/call` → ToolCall → handle → forward/MCP-error).
+**The seam:** Part 1 produces the baseline the E7 proxy reads. Same `BaselineStore`, same
+`score_chain` — E7 adds only the MCP transport shell (CFP: `tools/list` passthrough,
+`tools/call` → ToolCall → handle → forward / MCP-error). Tests **TC-F-13/14** (already in
+the CFP E7 section).
 
 ### Order of work
-1. **E8 first** — without a trustworthy baseline there is nothing to enforce against.
-2. **E7 second** — point a real Kagent at the proxy; confirm a `tools/call` outside the
-   consensus baseline returns an MCP error and never reaches the ToolServer.
+1. **Part 1 (FR-9 producer) first** — no trustworthy baseline → nothing to enforce.
+2. **E7 second** — point a real Kagent at the proxy; a `tools/call` outside the consensus
+   baseline returns an MCP error and never reaches the ToolServer.
 
 ---
 
-## What this is NOT (scope guard)
-- Not retraining or fine-tuning models — DriftWatch only *reads* their proposed chains.
-- Not capability-weighted (we keep majority, not weighted, so it doesn't contradict the
-  inverse-scaling finding that bigger ≠ safer).
+## Scope guard (what this is NOT)
+- Not new CFP scope — FR-9 and E7 were always in the proposal; this implements them.
+- Not retraining/fine-tuning — DriftWatch only *reads* models' proposed chains.
+- Not capability-weighted — majority, so it doesn't contradict the inverse-scaling finding.
 - Not operator-embedded LLM calls — seeding is offline; the operator stays LLM-free.
