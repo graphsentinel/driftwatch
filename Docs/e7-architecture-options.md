@@ -140,11 +140,12 @@ capability.
 1. **Spike — agentgateway ext_authz contract** (doc/spec, no cluster): does the request body
    carry the MCP tool name + arguments, and is there a stable session/agent/task field for
    chain correlation? This spike is the decision gate for B's status.
-2. **Reference path (A) core** — the pure JSON-RPC↔engine mapping (`to_engine_call`), pure
-   and unit-tested, no cluster. Useful to *both* options (B can reuse it if agentgateway
+2. **Reference path (A) core** — the pure name/args → engine-dict mapping (`to_engine_call`),
+   pure and unit-tested, no cluster. Useful to *both* options (B can reuse it if agentgateway
    forwards the raw body).
-3. **A transport shell + chain keying** — `mcp_proxy.py` over the JSON-RPC-over-POST core,
-   per-session chain state; unit-tested with a stub upstream.
+3. **A proxy shell + chain keying** — the MCP-library proxy (FastMCP `create_proxy`) plus the
+   `on_call_tool` enforcement middleware and per-session chain state; unit-tested with a fake
+   upstream MCP server. (The library owns transport — we do not write JSON-RPC.)
 4. **Live e2e** — A against a real Kagent + ToolServer; and, if the step-1 spike passed,
    a B (agentgateway ext_authz) wiring + e2e. Both gated on the real cluster pieces being
    available.
