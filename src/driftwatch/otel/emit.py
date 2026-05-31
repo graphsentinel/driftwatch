@@ -68,6 +68,10 @@ class Emitter:
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
             from opentelemetry.sdk.metrics import MeterProvider
             from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+            from opentelemetry.sdk.metrics.view import (
+                ExplicitBucketHistogramAggregation,
+                View,
+            )
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -93,7 +97,18 @@ class Emitter:
                 OTLPMetricExporter(endpoint=endpoint, insecure=insecure),
                 export_interval_millis=5000,
             )
-            metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
+            # The score is normalized to [0,1]; the default histogram buckets (5,10,25…)
+            # would dump every value into the first bucket. Use explicit [0,1] boundaries
+            # so the dashboard's quantiles are meaningful (R10a).
+            score_view = View(
+                instrument_name="driftwatch.score.value",
+                aggregation=ExplicitBucketHistogramAggregation(
+                    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+                ),
+            )
+            metrics.set_meter_provider(
+                MeterProvider(resource=resource, metric_readers=[reader], views=[score_view])
+            )
             meter = metrics.get_meter("driftwatch")
             self._m_decisions = meter.create_counter(
                 "driftwatch.decisions", description="scored decisions by gate.action")

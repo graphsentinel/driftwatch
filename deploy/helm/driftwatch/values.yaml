@@ -4,6 +4,21 @@ image:
   tag: 0.1.0a0
   pullPolicy: IfNotPresent
 
+# Hardened by default (NFR-9). The image is already non-root (uid 10001); these enforce
+# it at the pod/container level. /data is an emptyDir mount, so readOnlyRootFilesystem
+# stays compatible with the sqlite baseline store.
+securityContext:
+  pod:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
 operator:
   replicas: 1
   resources:

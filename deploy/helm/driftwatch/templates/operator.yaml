@@ -12,11 +12,17 @@ spec:
       labels: { app.kubernetes.io/name: driftwatch, app.kubernetes.io/component: operator }
     spec:
       serviceAccountName: driftwatch-operator
+      {{- with .Values.securityContext.pod }}
+      securityContext: {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: operator
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["driftwatch-operator"]
+          {{- with .Values.securityContext.container }}
+          securityContext: {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: DRIFTWATCH_OTLP_ENDPOINT
               value: "{{ .Values.otel.endpoint }}"
