@@ -179,9 +179,30 @@ link works only if the collector publishes `:4317` on the host's `0.0.0.0`.
 - Last resort: point `values-k3d.yaml` `otel.endpoint` at your host's LAN IP instead of
   `host.k3d.internal`.
 
-**Operator pod `ImagePullBackOff`.**
-The image is public, so a clean cluster should pull it. If you're offline or iterating,
-side-load with `k3d image import` (see §4B).
+**Operator pod `ImagePullBackOff` / `TLS handshake timeout` pulling from GHCR.**
+The image is public; a **fresh** k3d cluster pulls it fine (~2s). A long-lived cluster
+can develop flaky egress and time out the TLS handshake to ghcr.io — recreating the
+cluster (`make cluster-down && make cluster-up`) fixes it. If you're offline or
+iterating on the image, side-load instead of pulling:
+```bash
+podman save --format docker-archive -o /tmp/dw.tar ghcr.io/graphsentinel/driftwatch:0.1.0a0
+k3d image import /tmp/dw.tar -c driftwatch-demo
+```
+
+**Demo runs but Grafana/Jaeger stay empty.**
+The demo only exports telemetry when `DRIFTWATCH_OTLP_ENDPOINT` is set — otherwise it
+just prints a console summary. Run `DRIFTWATCH_OTLP_ENDPOINT=localhost:4317 make demo-all`.
+
+**OTLP export fails with `SSL_ERROR ... WRONG_VERSION_NUMBER` / `UNAVAILABLE`.**
+The collector listens on **plaintext** gRPC; the exporter must use insecure (it does so
+automatically for a bare `host:port`). Don't prefix the endpoint with `https://` unless
+the collector actually terminates TLS.
+
+**Iterated the image — cluster still runs the old one.**
+Rebuild, re-push to GHCR, then force a fresh pull: delete the node-cached image
+(`docker exec <node> crictl rmi ghcr.io/graphsentinel/driftwatch:0.1.0a0`) and
+`kubectl -n driftwatch rollout restart deploy/driftwatch-operator` (chart sets
+`pullPolicy` so a restart re-pulls).
 
 **`make deploy` fails: namespace not found.**
 `make deploy` doesn't create the namespace; run `kubectl create namespace driftwatch`
@@ -216,11 +237,18 @@ make obs-down          # podman-compose down
 
 ---
 
-### What's verified vs. what you run
+### Verified end-to-end
 
-- **Verified in this repo:** image builds (docker + podman) and both entrypoints run;
-  the chart lints, renders, and is **pullable anonymously from GHCR**; the five
-  scenarios pass standalone (`make demo-all`, no cluster).
-- **You run (not exercised end-to-end here):** the live k3d bring-up, the OTLP link from
-  cluster to the host collector, and the Grafana/Jaeger views. Work top-to-bottom; §6
-  covers the failure most likely on first run (the cross-runtime OTLP link).
+This flow has been run start-to-finish on k3d:
+- Observability stack up; collector `:4317` reachable on all interfaces.
+- Fresh k3d cluster pulls the public image from GHCR (~2s, no side-load).
+- `helm install` from the public OCI chart brings up CRD + operator + RBAC; the operator
+  is `1/1 Running` and **reconciles** a policy (writes `status.baselineReady` /
+  `observedTaskTypes`).
+- `DRIFTWATCH_OTLP_ENDPOINT=localhost:4317 make demo-all` → 5/5 scenarios, spans land in
+  **Jaeger** (service `driftwatch`) and metrics in **Prometheus**
+  (`driftwatch_decisions_total`, `_anomaly_total`, `_score_value_*`); Grafana
+  auto-provisions the *agent-decisions* dashboard against them.
+
+Still roadmap: governing a **real** Kagent at the MCP hop (path B, §7) and the webhook
+sidecar injector.
