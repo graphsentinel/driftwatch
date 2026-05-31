@@ -94,3 +94,41 @@ Suite: 28 passed; ruff clean; helm renders.
 - `Docs/publishing-ghcr.md`: automated (Actions) and manual push paths, plus the one-time "make package public" step.
 
 Maps to: the cluster-deployable gap called out in the review — image now builds and has a publish path.
+
+## S7 — k3d bring-up & hardening (first real cluster run)
+Standing the demo up end-to-end on a live k3d cluster surfaced a chain of bugs the unit
+suite couldn't catch — each a "builds/looks-wired but never actually run" gap. All fixed,
+with a regression test where testable:
+- **compose**: observability images fully-qualified (`docker.io/...`, podman won't resolve
+  short names) + bumped to the Obs-Summit tested set (collector 0.151.0, jaeger 1.76.0,
+  prometheus v3.11.3, grafana 11.6.14, neo4j 5.26-community).
+- **operator startup** (a CrashLoop chain, each bug hidden behind the previous):
+  - `kopf.cli.main()` → `AttributeError` (kopf.cli not auto-imported) → embedded `kopf.run(standalone=True)`.
+  - admission handler demanded a webhook server that's off by default → `@kopf.on.validate` opt-in via `DRIFTWATCH_ADMISSION`.
+  - kopf auth "ran out of credentials" → pin `kubernetes<31` + add `pykube-ng`.
+  - reconcile `Permission denied: 'data'` (non-root sqlite write) → `DRIFTWATCH_DATA_DIR` env + chart emptyDir at `/data`.
+- **interceptor**: `/v1/tool-call` returned 422 (FastAPI read the `Response` annotation as a
+  query param under `from __future__ import annotations`) → status via `JSONResponse`; added HTTP-layer tests.
+- **telemetry**: demo `Emitter` wired to `DRIFTWATCH_OTLP_ENDPOINT`; OTLP gRPC forced `insecure`
+  for the plaintext collector (was failing SSL `WRONG_VERSION_NUMBER`). Spans verified in Jaeger (service `driftwatch`).
+- **metrics + Grafana**: emit OTLP metrics (`driftwatch_decisions_total` / `_anomaly_total` /
+  `_score_value_*`); provision Grafana datasources (Prometheus + Jaeger) + dashboard so panels render real data.
+- **eval results**: `make eval --out` writes `drift_inverse_scaling.{json,txt}` + `drift_rows.jsonl`
+  (sre-incident-demo layout); seed run flagged "do NOT use for headline" (β₁=0 — seed has no
+  capability signal). Fixed root Makefile `eval` PYTHONPATH.
+- **kagent reality**: real Kagent is Helm-installed + controller-managed (not a hand-authored
+  Deployment) → reframed `sample-agents.yaml` as a path-A stand-in, documented the path-B MCP-hop
+  integration; repaired `sidecar-manual.yaml`.
+- **docs**: `examples/k3d-cluster-demo/SETUP_RUNBOOK.md` (observability → cluster → install → data,
+  + cross-runtime OTLP-link troubleshooting); `Docs/consensus-and-mcp-proxy-plan.md` (FR-9
+  consensus-seed producer + E7 MCP-proxy; TC-F-16/17 E7, TC-F-18/19 consensus); publishing-ghcr
+  switched to podman (docker noted equivalent).
+
+Verified end-to-end on k3d: GHCR public image pulled remotely (~2s), operator `1/1 Running`
+reconciling policy status, `make demo-all` → 5/5 with `gen_ai.agent.*` in Jaeger and metrics
+in Prometheus/Grafana.
+
+> Status: v1alpha1 reference implementation, **validated end-to-end on k3d**. Next: FR-9
+> consensus-seed producer + E7 MCP-proxy enforcement (planned in
+> `Docs/consensus-and-mcp-proxy-plan.md`). Go/controller-runtime rewrite remains roadmap
+> once the CRD contract stabilizes.
