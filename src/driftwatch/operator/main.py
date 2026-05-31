@@ -31,14 +31,25 @@ def run() -> None:  # console entry point: driftwatch-operator
 
 
 try:  # register handlers only when kopf is available
+    import os
+
     import kopf
 
-    @kopf.on.validate(GROUP, VERSION, PLURAL)  # type: ignore[misc]
-    def validate_policy(spec, name, **_):  # TC-F-01
-        try:
-            validate({**dict(spec), "_name": name})
-        except PolicyError as e:
-            raise kopf.AdmissionError(str(e), code=400)
+    # Admission (validate) handler is OPT-IN. Registering a @kopf.on.validate handler
+    # makes kopf require an admission server/tunnel; without one (the default — the
+    # webhook is off in values.yaml, injector is roadmap) kopf aborts at startup with
+    # "Admission handlers exist, but no admission server is configured". So only register
+    # it when the chart enables the webhook (DRIFTWATCH_ADMISSION=1). Validation is NOT
+    # lost when off: reconcile_policy below validates every create/update, and the CRD's
+    # OpenAPI schema enforces structure at the API server.
+    if os.environ.get("DRIFTWATCH_ADMISSION") == "1":  # pragma: no cover - needs webhook
+
+        @kopf.on.validate(GROUP, VERSION, PLURAL)  # type: ignore[misc]
+        def validate_policy(spec, name, **_):  # TC-F-01
+            try:
+                validate({**dict(spec), "_name": name})
+            except PolicyError as e:
+                raise kopf.AdmissionError(str(e), code=400)
 
     @kopf.on.create(GROUP, VERSION, PLURAL)  # type: ignore[misc]
     @kopf.on.update(GROUP, VERSION, PLURAL)  # type: ignore[misc]
