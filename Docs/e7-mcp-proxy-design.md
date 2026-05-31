@@ -87,6 +87,9 @@ A `Middleware` subclass whose `on_call_tool(self, context, call_next)`:
      suppresses the side effect without surfacing an error. (Forwarding on drop would collapse
      drop into log/allow, which is wrong — drop's whole point is "don't let it happen, but
      don't error".) The exact empty/benign MCP result shape is pinned at implementation.
+    **Drop semantics must be validated with real Kagent** — some agents may retry after an
+    empty result, so confirm the chosen shape (empty result vs. a benign "no-op" payload)
+    doesn't trigger a retry loop; this is a T-E7.5 (real-Kagent) acceptance check.
 
 The chain is still updated on drop (the call was observed), so sequence state stays correct
 for the next call. Reuse the same engine wiring as the sidecar (shared baseline + policy from
