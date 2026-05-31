@@ -60,8 +60,8 @@ via Kagent's `RemoteMCPServer`.
 Kagent agent pod ──MCP──> DriftWatch (FastMCP proxy + middleware) ──MCP──> real MCP ToolServer
                           on_call_tool: Interceptor.handle()
                           forward => upstream result
-                          block   => ToolError (never reaches upstream)
-                          drop    => synthetic empty result (upstream NOT called)
+                          block   => ToolError "blocked …" (upstream NOT called)
+                          drop    => ToolError "dropped …" (upstream NOT called)
 ```
 
 Because DriftWatch terminates the MCP session as a server, it sees the whole session and can
@@ -89,14 +89,18 @@ A `Middleware` subclass whose `on_call_tool(self, context, call_next)`:
      call proceeds to the upstream ToolServer and its real result is returned);
    - **block** → `raise ToolError(...)` with the drift reason + score, so the call never
      reaches the upstream and the agent sees *why*;
-   - **drop** → **do NOT call `call_next`** (the upstream is never invoked) and return a
-     synthetic benign/empty result. Drop must stay distinct from both forward and block: it
-     suppresses the side effect without surfacing an error. (Forwarding on drop would collapse
-     drop into log/allow, which is wrong — drop's whole point is "don't let it happen, but
-     don't error".) The exact empty/benign MCP result shape is pinned at implementation.
-    **Drop semantics must be validated with real Kagent** — some agents may retry after an
-    empty result, so confirm the chosen shape (empty result vs. a benign "no-op" payload)
-    doesn't trigger a retry loop; this is a T-E7.5 (real-Kagent) acceptance check.
+   - **drop** → **do NOT call `call_next`** (the upstream is never invoked); at the MCP hop,
+     surface drop as a `ToolError` too — message `"dropped …"` (vs block's `"blocked …"`) —
+     **not** a synthetic success. *(Decision made during implementation, superseding the
+     earlier "synthetic empty result" plan.)* Reason: a fake success result must satisfy the
+     upstream tool's **output schema** (e.g. `{"result": ...}`), which the proxy does not
+     know — returning one risks schema-validation failures or a fabricated value the agent
+     trusts. An MCP error is schema-agnostic and unambiguous; forward stays the only success
+     path, so drop never collapses into log/allow. Drop remains a silent 200/empty **only on
+     the sidecar/HTTP hop**, where there is no upstream output schema to satisfy.
+    **Drop behavior must still be validated with real Kagent** — some agents may retry on a
+    tool error, so confirm the `"dropped …"` error doesn't trigger a retry loop; this is a
+    T-E7.5 (real-Kagent) acceptance check.
 
 The chain is still updated on drop (the call was observed), so sequence state stays correct
 for the next call. Reuse the same engine wiring as the sidecar (shared baseline + policy from
