@@ -52,14 +52,22 @@ class Emitter:
         self.service_name = service_name
         self.endpoint = endpoint
         self._tracer = None
+        self._m_decisions = None
+        self._m_anomaly = None
+        self._m_score = None
         # Only wire a live OTLP exporter when an endpoint is explicitly configured.
         # With no endpoint (tests, demos, offline scoring) we stay a pure dict builder —
         # no background export thread, no global-provider side effects.
         if not endpoint:
             return
         try:  # optional dependency — interceptor extra
-            from opentelemetry import trace
+            from opentelemetry import metrics, trace
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+                OTLPMetricExporter,
+            )
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            from opentelemetry.sdk.metrics import MeterProvider
+            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -68,12 +76,31 @@ class Emitter:
             # (a bare host:port then fails with SSL WRONG_VERSION_NUMBER). Use insecure
             # unless the endpoint explicitly opts into TLS via an https:// scheme.
             insecure = not endpoint.startswith("https://")
-            provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
+            resource = Resource.create({"service.name": service_name})
+
+            provider = TracerProvider(resource=resource)
             provider.add_span_processor(
                 BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=insecure))
             )
             trace.set_tracer_provider(provider)
             self._tracer = trace.get_tracer("driftwatch")
+
+            # Metrics power the Grafana dashboard (Prometheus scrapes the collector's
+            # :8889). They surface in Prometheus as driftwatch_decisions_total /
+            # driftwatch_anomaly_total / driftwatch_score_value_bucket — the names the
+            # dashboard panels query.
+            reader = PeriodicExportingMetricReader(
+                OTLPMetricExporter(endpoint=endpoint, insecure=insecure),
+                export_interval_millis=5000,
+            )
+            metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
+            meter = metrics.get_meter("driftwatch")
+            self._m_decisions = meter.create_counter(
+                "driftwatch.decisions", description="scored decisions by gate.action")
+            self._m_anomaly = meter.create_counter(
+                "driftwatch.anomaly", description="drift decisions by computed.anomaly.kind")
+            self._m_score = meter.create_histogram(
+                "driftwatch.score.value", description="normalized drift score [0,1]")
         except Exception:
             self._tracer = None  # graceful: build_* still usable for tests/logs
 
@@ -87,4 +114,9 @@ class Emitter:
                 for k, v in span_attrs.items():
                     span.set_attribute(k, v)
                 span.add_event(A.GEN_AI_EVALUATION_RESULT_EVENT, attributes=event_attrs)
+        if self._m_decisions is not None:  # pragma: no cover - needs OTel + collector
+            self._m_decisions.add(1, {"gate_action": decision.gate_action})
+            self._m_score.record(decision.score_value, {"gate_action": decision.gate_action})
+            if decision.is_drift and decision.anomaly_kind:
+                self._m_anomaly.add(1, {"anomaly_kind": decision.anomaly_kind})
         return {"span": span_attrs, "event": event_attrs}

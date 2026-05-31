@@ -1,0 +1,16 @@
+# Grafana datasource provisioning — Prometheus (metrics) + Jaeger (traces).
+# Mounted at /etc/grafana/provisioning/datasources so the dashboard panels resolve
+# without manual setup. Hostnames are the compose service names.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    uid: prometheus
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    uid: jaeger

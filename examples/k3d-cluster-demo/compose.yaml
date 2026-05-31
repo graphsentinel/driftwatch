@@ -35,6 +35,8 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     volumes:
       - ./grafana-dashboard.json:/var/lib/grafana/dashboards/agent-decisions.json:ro
+      - ./grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
     ports:
       - "3000:3000"     # Grafana UI
 
