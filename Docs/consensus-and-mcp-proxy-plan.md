@@ -1,7 +1,15 @@
 # Plan — Consensus Baseline (FR-9) + MCP-Proxy Enforcement (E7)
 
-Design-only (no code yet). This is **not new scope** — both pieces are already in the CFP;
-this doc is the implementation plan for the parts that are specified but not yet coded:
+**Status (R9 update):** the consensus *producer core* is now coded and tested —
+`consensus/aggregate.py` (multi-granularity quorum, T-C2), the offline `consensus-seed`
+CLI + `consensus_seed.json` provenance (T-C3/T-C4/T-C5), and 8 tests in
+`tests/test_consensus.py` (TC-F-18/19/28). Still **roadmap**: live model-panel polling —
+the provider clients in `runner.py` (T-C1) that PRODUCE the proposals — and all of Part 2
+(E7 MCP-proxy enforcement). The offline path consumes a pre-collected proposals JSON, so
+the quorum logic is deterministic and network-free.
+
+This is **not new scope** — both pieces are already in the CFP; this doc is the
+implementation plan for the parts that are specified but not yet coded:
 
 - **Consensus baseline seed = FR-9**, already in the CFP: the CRD example shows
   `sources: [..., {models: [qwen, gemma]}]` ("2+ models vote on the expected chain to seed

@@ -136,6 +136,33 @@ def eval_main(argv: list[str] | None = None) -> int:
     return run_eval(args.dataset, out_dir=args.out)
 
 
+def consensus_seed_main(argv: list[str] | None = None) -> int:
+    """`driftwatch consensus-seed` — offline FR-9 baseline seeding from a proposals JSON."""
+    import json
+
+    from .consensus.seed import seed_from_proposals
+
+    parser = argparse.ArgumentParser(prog="driftwatch consensus-seed")
+    parser.add_argument("--proposals", required=True, help="model-panel proposals JSON file")
+    parser.add_argument("--policy", required=True, help="AgentDriftPolicy spec JSON file")
+    parser.add_argument("--out", default=None, help="dir for consensus_seed.json provenance")
+    args = parser.parse_args(argv)
+
+    with open(args.proposals) as f:
+        proposals = json.load(f)
+    with open(args.policy) as f:
+        policy = json.load(f)
+
+    results, _ = seed_from_proposals(proposals, policy, out_dir=args.out)
+    for task, r in sorted(results.items()):
+        if r.seeded:
+            chains = ", ".join("->".join(c.tools) for c in r.chains)
+            print(f"{task:<28} seeded (N={r.n_models}, quorum={r.quorum}): {chains}")
+        else:
+            print(f"{task:<28} SKIPPED: {r.reason}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="driftwatch")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -145,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--dataset", required=True)
     e.add_argument("--out", default=None,
                    help="dir to write results (json/txt/jsonl); omit for stdout only")
+    cs = sub.add_parser("consensus-seed",
+                        help="seed a baseline from a model-panel proposals JSON (FR-9)")
+    cs.add_argument("--proposals", required=True)
+    cs.add_argument("--policy", required=True)
+    cs.add_argument("--out", default=None)
     args = parser.parse_args(argv)
     if args.cmd == "demo":
         return run_demo(args.scenario)
@@ -153,6 +185,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.out:
             argv_eval += ["--out", args.out]
         return eval_main(argv_eval)
+    if args.cmd == "consensus-seed":
+        argv_cs = ["--proposals", args.proposals, "--policy", args.policy]
+        if args.out:
+            argv_cs += ["--out", args.out]
+        return consensus_seed_main(argv_cs)
     return 2
 
 

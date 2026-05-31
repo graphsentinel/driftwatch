@@ -186,10 +186,18 @@ combination/order never was.
 **Amend the consensus plan.** Apply quorum at multiple granularities, not just the tool
 set: tool **and** scope **and** ordered transition **and** (where N allows) a full-chain
 template. Provenance mandatory.
-- **DoD:** [ ] aggregate.py keeps a transition/scope/chain-template only if quorum models
-  produced it, not just the union of majority tools; provenance records each level.
-- **Test:** TC-F-28 (a combined chain no single model proposed is NOT in the baseline even
-  if each tool is individually majority).
+- **DoD:** [x] `consensus/aggregate.py` keeps a transition/scope/chain-template only if
+  quorum models produced it, not just the union of majority tools; provenance records each
+  level. ✅ Coded: template-first (quorum chain-templates) with a quorum-transition
+  fallback, quorum default `max(2, ceil(N/2))`, offline `consensus-seed` CLI +
+  `consensus_seed.json` provenance.
+- **Test:** [x] TC-F-28 (a combined chain no single model proposed is NOT in the baseline
+  even if each tool is individually majority) ✅ — plus TC-F-18 (majority keep / minority
+  drop) and TC-F-19 (single-model refusal). 8 tests in `tests/test_consensus.py`.
+
+> Status: the consensus *producer* (R9 core: quorum aggregation + offline seed CLI) is
+> coded and tested. Live model-panel polling (the provider clients in `runner.py`) and the
+> E7 MCP-proxy enforcement remain roadmap — see `consensus-and-mcp-proxy-plan.md`.
 
 ---
 
@@ -225,8 +233,9 @@ Also folded into the CFP this pass: FR-10, NFR-7..10 (requirements table); TC-F-
 4. **R4** (feature mask) — contained `score_chain` change. *(FR-2)*
 5. **R6** (poisoning guard) — baseline source-trust. *(NFR-8)*
 6. **R1** (operator→sidecar handoff + e2e) — the headline gap. *(RE1, biggest)*
-7. **R8** (PVC) ✅, **R10b** (namespace-scoped RBAC) ✅ — prod depth shipped; **R9**
-   (consensus-producer code, FR-9) ⬜ still uncoded (granularity wording already amended).
+7. **R8** (PVC) ✅, **R10b** (namespace-scoped RBAC) ✅, **R9** (consensus-producer:
+   multi-granularity quorum + offline seed CLI, FR-9 core) ✅ — prod depth shipped. Live
+   model-panel polling (`runner.py` providers) + E7 MCP-proxy enforcement remain roadmap.
 
 Each step: code → test (no skips) → commit. R1 is the largest and lands after the cheap
 wins so it's exercised by a CI that actually runs the runtime.
