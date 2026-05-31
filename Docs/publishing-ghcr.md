@@ -8,8 +8,8 @@ Two artifacts, one registry (`ghcr.io`, owner = **graphsentinel**):
 | Helm chart (OCI artifact) | `oci://ghcr.io/graphsentinel/charts/driftwatch:0.1.0` |
 
 Both start **private** and are flipped to **public** once. After that, any third party
-can `helm install` from the OCI chart and `docker pull` the image with no auth — fully
-independent of where you built them.
+can `helm install` from the OCI chart and `podman pull` (or `docker pull`) the image
+with no auth — fully independent of where you built them.
 
 > **Config is NOT baked into the image.** The image is generic; endpoints/secrets come
 > in at deploy time via Helm `values` / `--set` and the `AgentDriftPolicy` CRD. That is
@@ -19,7 +19,9 @@ independent of where you built them.
 
 ## Path A — manual, no GitHub Actions (recommended for you)
 
-Everything below is local `docker` + `helm`. No CI required.
+Everything below is local container tooling + `helm`. No CI required. **Both `podman`
+and `docker` work** — the commands are identical, so use whichever you have (examples
+below use `podman`; swap in `docker` verbatim if you prefer).
 
 ### 0. One-time: a PAT for registry login
 
@@ -41,11 +43,15 @@ git push -u origin main
 ### 2. Build + push the container image
 
 ```bash
-echo "$GHCR_PAT" | docker login ghcr.io -u graphsentinel --password-stdin
+echo "$GHCR_PAT" | podman login ghcr.io -u graphsentinel --password-stdin
 
-docker build -t ghcr.io/graphsentinel/driftwatch:0.1.0a0 .
-docker push       ghcr.io/graphsentinel/driftwatch:0.1.0a0
+podman build -t ghcr.io/graphsentinel/driftwatch:0.1.0a0 .
+podman push       ghcr.io/graphsentinel/driftwatch:0.1.0a0
 ```
+
+> The image is built and smoke-tested locally: `podman build` succeeds and the
+> `driftwatch-interceptor` entrypoint serves `/healthz` (200) and `/v1/tool-call`
+> (403 on drift). `driftwatch-operator` is the default entrypoint.
 
 ### 3. Package + push the Helm chart (OCI)
 
@@ -109,13 +115,17 @@ kubectl apply -f https://raw.githubusercontent.com/graphsentinel/driftwatch/main
 That is the scenario end to end: chart installs the governance plane, a policy drives
 it, the agent pod gets the interceptor sidecar.
 
+> The manifests above are **path A** (a stand-in / BYO-agent sidecar). For governing a
+> real, Helm-installed Kagent at the MCP tool-call hop (**path B**), see
+> `examples/k3d-cluster-demo/README.md` — the MCP-proxy adapter is the next sprint.
+
 ---
 
 ## Verify it's really public
 
 ```bash
-docker logout ghcr.io
-docker pull ghcr.io/graphsentinel/driftwatch:0.1.0a0          # must succeed, no login
+podman logout ghcr.io
+podman pull ghcr.io/graphsentinel/driftwatch:0.1.0a0          # must succeed, no login
 helm pull oci://ghcr.io/graphsentinel/charts/driftwatch --version 0.1.0   # must succeed
 ```
 
