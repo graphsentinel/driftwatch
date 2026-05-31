@@ -135,6 +135,59 @@ podman pull ghcr.io/graphsentinel/driftwatch:0.1.0a0          # must succeed, no
 helm pull oci://ghcr.io/graphsentinel/charts/driftwatch --version 0.1.0   # must succeed
 ```
 
+## Release immutability — pin the digest, don't trust the tag
+
+A mutable tag (`0.1.0a0`) that gets re-pushed several times is a trust problem for an
+outside reviewer: `podman pull ...:0.1.0a0` on two different days can resolve to two
+different digests. For review, runbooks, and the on-stage demo, **pin the immutable
+digest**, and cut a **new alpha tag** rather than re-pushing the old one.
+
+**On release — bump to a fresh alpha tag, never repush an existing one:**
+
+```bash
+TAG=0.1.0a1                     # PEP 440 alpha; bump per release, do NOT reuse 0.1.0a0
+podman build -t ghcr.io/graphsentinel/driftwatch:$TAG .
+podman push ghcr.io/graphsentinel/driftwatch:$TAG
+
+# capture the immutable digest the registry assigned, and record it in the runbook
+podman inspect --format '{{ index .RepoDigests 0 }}' ghcr.io/graphsentinel/driftwatch:$TAG
+# -> ghcr.io/graphsentinel/driftwatch@sha256:<digest>   <-- this is what you cite
+```
+
+**Verify what's actually published (and what a cluster is running):**
+
+```bash
+# the digest the tag currently resolves to in the registry
+skopeo inspect docker://ghcr.io/graphsentinel/driftwatch:0.1.0a1 | jq -r .Digest
+
+# the digest a live pod is running (must match the line above)
+kubectl -n driftwatch get pod -l app.kubernetes.io/name=driftwatch \
+  -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}'
+```
+
+**Pin the digest in Helm for review/demo** (so the install is reproducible regardless of
+later re-tags). `values.yaml` carries `image.digest: ""`; set it and the operator template
+renders `repository@digest`, ignoring the tag:
+
+```bash
+helm install driftwatch oci://ghcr.io/graphsentinel/charts/driftwatch --version 0.1.0 \
+  --namespace driftwatch --create-namespace \
+  --set-string image.digest="sha256:<digest>"
+# When image.digest is set the operator template pins repository@digest and ignores the
+# tag; leave it empty to track the tag (see templates/operator.yaml + values.yaml).
+```
+
+**Smoke-check that a pulled/running image actually carries the latest code:**
+
+```bash
+podman run --rm ghcr.io/graphsentinel/driftwatch:0.1.0a1 \
+  python -c "from driftwatch.consensus import quorum_for; print('consensus OK', quorum_for(4))"
+```
+
+> Canonical digest as of the last publish: **record the current one here on every release.**
+> Do not chase an older digest — the canonical image is the one currently published and
+> running with the latest code (verify with the consensus smoke check above).
+
 ## One image, two entrypoints
 
 The single image runs either plane; pick the command per workload (the chart and
