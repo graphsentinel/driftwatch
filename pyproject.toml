@@ -30,6 +30,7 @@ all = ["driftwatch[operator,interceptor,graph,mcp,dev]"]
 driftwatch-operator = "driftwatch.operator.main:run"
 driftwatch-interceptor = "driftwatch.interceptor.main:run"
 # (run() lives in interceptor/main.py; server.py holds the ASGI build_app)
+driftwatch-mcp = "driftwatch.interceptor.mcp_proxy:run"   # E7 path-B chain-aware MCP proxy (needs .[mcp])
 driftwatch-eval = "driftwatch.cli:eval_main"
 
 [tool.setuptools.packages.find]

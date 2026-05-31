@@ -65,3 +65,21 @@ webhook:
   # in deploy/sidecar-manual.yaml. Set true once the injector image ships.
   enabled: false
   failurePolicy: Ignore        # Ignore so a webhook outage never blocks pod creation
+
+# E7 path-B: chain-aware MCP proxy in front of a real MCP ToolServer (governs real Kagent
+# via a RemoteMCPServer CR pointing at this Service). Off by default — opt-in for path B.
+# When enabled it REQUIRES mcpProxy.upstreamMcp and persistence.enabled=true (the proxy
+# mounts the operator-written baseline read-only from the shared PVC) and enforces the same
+# policy via env (FR-10). Needs the .[mcp] image extra (fastmcp).
+mcpProxy:
+  enabled: false
+  port: 8000
+  upstreamMcp: ""        # REQUIRED when enabled: the real MCP ToolServer URL the proxy fronts
+  taskType: ""           # optional: scope per-session chains to one task type
+  action: block          # log | drop | block
+  threshold: "3.0"
+  failurePolicy: failClosed
+  features: "tool,scope,sequence,argSchemaHash"
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
