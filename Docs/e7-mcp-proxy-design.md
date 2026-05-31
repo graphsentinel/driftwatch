@@ -7,92 +7,113 @@
 > spike proving agentgateway forwards the raw `tools/call` body plus a stable
 > session/agent/task correlation key.
 
-**Status: design only. Implementation is sequenced LAST** (after FR-9 `runner.py` and the
-webhook sidecar injector). This doc is the plan so the implementation, when it lands, is
+**Status: design only.** This doc is the plan so the implementation, when it lands, is
 mechanical and grounded in what already exists.
 
-## Why E7 is small in code, large in integration
+## Don't hand-roll MCP transport — use the official SDK / FastMCP
 
-The detection core is already transport-agnostic. `Interceptor.handle(raw_call: dict)` takes
-a plain dict, normalizes via the runtime adapter, scores against the baseline, and returns a
-`Verdict(outcome, http_status, decision, signals)`. `KagentAdapter.normalize` already maps
-the MCP-ish shape `{"tool", "namespace", "args"}`. So E7 adds **no new detection logic** —
-it adds a **transport shell** that speaks MCP on the wire and calls the existing engine.
+The earlier draft of this doc proposed writing JSON-RPC framing, `tools/list` passthrough,
+and upstream forwarding by hand (`interceptor/mcp.py` + `mcp_proxy.py`). **That was wrong** —
+the fragile part (the protocol) is exactly what a maintained library should own. DriftWatch
+is Python, so use the **official MCP Python SDK** (`mcp` on PyPI) and its ergonomic
+**FastMCP** layer, which already provide:
 
-The weight of E7 is *integration*, not algorithm: a real Helm-installed Kagent, the MCP
-Streamable-HTTP protocol, a ToolServer to forward survivors to, and a model provider
-(OpenAI/etc.) for Kagent itself. That is why it is sequenced last and gated on a real
-cluster + credentials being available.
+- **Streamable HTTP** transport (the recommended prod transport; SSE is deprecated).
+- A **proxy/mediator** primitive (`FastMCP.as_proxy()` / `create_proxy()`) — DriftWatch can
+  be an MCP **server** to Kagent and an MCP **client** to the upstream ToolServer at once,
+  with `tools/list`, session lifecycle, streaming, and error mapping handled by the library.
+- **Middleware** with an `on_call_tool(self, context, call_next)` hook — the exact seam to
+  insert DriftWatch scoring before a call is forwarded upstream.
+
+So E7 becomes: a FastMCP proxy + one middleware class that calls the existing
+`Interceptor`. No hand-written transport. The detection core is unchanged —
+`Interceptor.handle(dict) -> Verdict`, scoring against the operator-reconciled baseline
+(FR-10 shared store).
 
 ## The integration point (verified understanding)
 
 Real Kagent is **Helm-installed and controller-managed**: an `Agent` CRD → a controller-
-created agent pod. Tool calls do **not** stay in-pod — they leave the agent pod over **MCP
-Streamable HTTP** to separate **MCP ToolServer** pods. So DriftWatch's enforcement seam is
-the **MCP tool-call hop**, not a sidecar on localhost (that's path A). DriftWatch registers
-as an **MCP proxy** via Kagent's `RemoteMCPServer`: Kagent points at DriftWatch, DriftWatch
-scores each `tools/call` and forwards survivors to the real ToolServer.
+created agent pod. Tool calls leave the agent pod over **MCP Streamable HTTP** to separate
+**MCP ToolServer** pods. DriftWatch's enforcement seam is the **MCP tool-call hop**:
+DriftWatch sits as an MCP proxy/mediator between Kagent and the real ToolServer, registered
+via Kagent's `RemoteMCPServer`.
 
 ```
-Kagent agent pod ──MCP──> DriftWatch MCP proxy ──MCP──> real MCP ToolServer
-                          (score tools/call;            (executes the tool)
-                           block => MCP error)
+Kagent agent pod ──MCP──> DriftWatch (FastMCP proxy + middleware) ──MCP──> real MCP ToolServer
+                          on_call_tool: Interceptor.handle()
+                          forward => upstream result
+                          block   => ToolError (never reaches upstream)
 ```
 
-This reuses the FR-9 consensus baseline (or any reconciled baseline) and `score_chain`
-unchanged — same `BaselineStore`, same shared store the operator writes (FR-10 seam).
+Because DriftWatch terminates the MCP session as a server, it sees the whole session and can
+hold **per-session decision-chain state** itself — the chain-aware thesis, native at the hop.
 
 ## What to build
 
-### T-E7.1 — MCP proxy server (`interceptor/mcp_proxy.py`)
+### T-E7.1 — FastMCP proxy/mediator (no hand-rolled JSON-RPC)
 
-A second ASGI app (sibling to `server.py`), speaking MCP Streamable HTTP. Two methods:
+A proxy app built with the official SDK / FastMCP: an MCP server (facing Kagent) backed by
+an MCP client to the upstream ToolServer (`FastMCP.as_proxy(<upstream>)`). The upstream URL
+comes from config (`DRIFTWATCH_UPSTREAM_MCP`). `tools/list` and non-tool methods are handled
+by the proxy automatically (passthrough) — DriftWatch only governs `tools/call`.
 
-- **`tools/list`** — passthrough: forward to the upstream ToolServer, return its tool list
-  unchanged. DriftWatch does not invent or hide tools; it only governs calls.
-- **`tools/call`** — the enforcement hop:
-  1. map the MCP `tools/call` params → the same dict `KagentAdapter` already eats
-     (`{"tool": name, "namespace": <from args/scope>, "args": arguments}`),
-  2. `verdict = interceptor.handle(that_dict)` (existing engine, existing baseline),
-  3. `forward`/`drop` → proxy the call to the upstream ToolServer, return its result;
-     `block` → return an **MCP error** (JSON-RPC error object) and never touch the upstream.
+### T-E7.2 — DriftWatch enforcement middleware (`on_call_tool`)
 
-The upstream ToolServer URL comes from config (env/values), like `DRIFTWATCH_UPSTREAM_MCP`.
-Reuse `build_default_interceptor()` for the engine so policy/baseline come from the same
-env+shared-store path as the sidecar (FR-10) — the proxy is just a different front door.
+A `Middleware` subclass whose `on_call_tool(self, context, call_next)`:
+1. reads `context.message.name` (tool) + `context.message.arguments` (dict),
+2. maps them to the dict the existing `RuntimeAdapter` eats
+   (`{"tool", "namespace"<-args.namespace/scope, "args"}`) — a tiny pure helper, the only
+   bit worth unit-testing in isolation,
+3. `verdict = interceptor.handle(that_dict)` against the per-session chain (T-E7.3),
+4. **forward** (within baseline / log / shadow) → `return await call_next(context)` (the
+   call proceeds to the upstream ToolServer);
+   **block** → `raise ToolError(...)` with the drift reason + score, so the call never
+   reaches the upstream and the agent sees *why*. (Drop, like the sidecar, is a no-op posture
+   — at the MCP hop we forward so the agent gets a well-formed response; block is the deny.)
 
-### T-E7.2 — MCP request/response mapping (pure, unit-testable)
+Reuse `build_default_interceptor()` so policy/baseline come from the same env + shared-store
+path as the sidecar (FR-10) — the proxy is just a different front door to the same engine.
 
-A small pure module that converts between MCP JSON-RPC `tools/call` and the engine's dict,
-and builds the MCP success/error envelopes. This is the only fiddly bit and must be unit-
-tested with **canned MCP payloads, no network** (mirrors how `aggregate.py` is pure):
-- `tools/call` params → engine dict (tool name, scope/namespace extraction, args)
-- `Verdict` → MCP result (forward: upstream result; block: JSON-RPC error with a clear
-  `code`/`message`, e.g. drift reason + score, so the agent sees *why* it was blocked).
+### T-E7.3 — Chain correlation (per session/agent/task)
 
-### T-E7.3 — Deploy wiring (Helm + Kagent `RemoteMCPServer`)
+DriftWatch scores ordered **chains**, not isolated calls, so calls must accumulate into the
+right chain. FastMCP middleware exposes session via `context.fastmcp_context.session_id`
+(and HTTP headers via `get_http_headers()` for an agent/task identity). Key a per-caller
+`Interceptor`/adapter chain by that id so two concurrent agents don't share a chain. This is
+the design item the consultant flagged — and the SDK gives us the key natively (unlike the
+Option-B ext_authz path, where agentgateway must forward it).
 
-- Helm: an optional `mcpProxy.enabled` Deployment+Service running the proxy entrypoint,
-  mounting the same baseline store (read-only, like the sidecar) + the policy env.
-- A `RemoteMCPServer` manifest (example, under `examples/`) pointing real Kagent at the
-  proxy Service. Document the real-Kagent install (the `helm install kagent ...` already in
-  `examples/k3d-cluster-demo/README.md` path B) + the model-provider secret it needs.
+### T-E7.4 — Unit tests with a fake upstream MCP server
 
-### T-E7.4 — e2e (needs a real cluster + Kagent + model key)
+Stand up an in-memory/fake upstream MCP server (the SDK supports in-memory client/server
+wiring) and drive the proxy:
+- within-baseline `tools/call` → forwarded, upstream result returned (TC-F-16),
+- drifting `tools/call` → `ToolError`, upstream **never invoked** (TC-F-17),
+- the pure name/args→engine-dict mapping (canned inputs, no network).
+No real Kagent/cluster needed for these.
 
-`examples/.../e7-mcp-proxy-e2e.sh`, structured like `fr10-e2e.sh`:
-- operator writes a baseline to the shared PVC (consensus-seed or trusted fold),
-- the MCP proxy loads it (read-only) and registers as Kagent's `RemoteMCPServer`,
-- drive Kagent with a within-baseline task → `tools/call` forwarded, tool executes,
-- drive a drift task → `tools/call` returns an MCP error, the ToolServer is never reached.
+### T-E7.5 — Real Kagent `RemoteMCPServer` e2e (later, gated)
+
+- Helm: optional `mcpProxy.enabled` Deployment+Service running the proxy, mounting the
+  baseline store read-only + policy env (like the sidecar).
+- A `RemoteMCPServer` example pointing real Kagent at the proxy Service; document the
+  real-Kagent install (path B in `examples/k3d-cluster-demo/README.md`) + model-provider
+  secret + an upstream ToolServer.
+- e2e script (like `fr10-e2e.sh`): within-baseline task → tool executes; drift task → MCP
+  error, ToolServer never reached.
+
+## Dependencies
+
+Add `mcp` (official SDK) — and `fastmcp` if we use the FastMCP layer — under a new optional
+extra (e.g. `mcp = ["mcp>=...", "fastmcp>=..."]`), folded into `all`, so the proxy is opt-in
+and the core/library install stays lean. Pin versions when implementing.
 
 ## Tests
 
-- **TC-F-16** — MCP `tools/call` within baseline is forwarded to the upstream ToolServer
-  and its result returned (unit: mapping + a stub upstream; e2e: real Kagent).
-- **TC-F-17** — MCP `tools/call` that drifts returns an MCP error and the upstream is never
-  called (unit: assert no upstream call + error envelope; e2e: real Kagent).
-- Mapping unit tests (T-E7.2): canned MCP payloads → engine dict → MCP envelopes, no net.
+- **TC-F-16** — within-baseline `tools/call` forwarded to the upstream (unit: fake upstream;
+  e2e: real Kagent).
+- **TC-F-17** — drifting `tools/call` → MCP error, upstream never called (unit + e2e).
+- Mapping unit test: name/args → engine dict, canned inputs, no network.
 
 ## Gherkin
 
@@ -114,14 +135,18 @@ Feature: MCP-proxy enforcement against the reconciled baseline (E7, path B)
 ## Boundaries (what E7 is NOT)
 
 - Not new detection logic — same `Interceptor.handle` + `score_chain` + baseline.
-- Not a replacement for path A — the in-process `make demo` + stand-in sidecar stay the
-  deterministic, dependency-free demo/fallback. E7 is the *real-Kagent* path.
+- Not hand-rolled transport — the official MCP SDK / FastMCP owns JSON-RPC, `tools/list`,
+  streaming, sessions, error mapping.
+- Not a replacement for path A's demo — the in-process `make demo` + stand-in sidecar stay
+  the deterministic, dependency-free demo/fallback. E7 is the *real-Kagent* path.
 - Not operator-embedded — the proxy is a data-plane workload like the sidecar; the operator
   still only reconciles + writes the baseline.
 
 ## Sequencing reminder
 
-Build order across the remaining roadmap: **FR-9 `runner.py`** (live model panel for
-consensus) → **webhook sidecar injector** → **E7 (this doc)**. E7 is last because it needs
-the most external scaffolding (real Kagent, a model provider, an upstream ToolServer) and
-benefits from consensus + injection already being in place.
+Across the remaining roadmap: **FR-9 `runner.py`** (live model panel for consensus) →
+**webhook sidecar injector** → **E7 (this doc)**. Within E7, the near-term, cluster-free
+work is T-E7.1–T-E7.4 (FastMCP proxy + middleware + chain keying + fake-upstream unit tests);
+T-E7.5 (real Kagent e2e) is gated on the cluster pieces. The Option-B spike
+(`e7-architecture-options.md`) runs in parallel and decides whether the gateway pattern can
+also be a primary production topology.

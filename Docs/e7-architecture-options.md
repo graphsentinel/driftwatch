@@ -21,27 +21,30 @@ Kagent agent pod ──MCP──> DriftWatch MCP proxy ──MCP──> real MCP
                            forwards survivors, blocks drift)
 ```
 
-DriftWatch registers as Kagent's `RemoteMCPServer`. It must itself speak MCP: parse
-JSON-RPC, pass through `tools/list`, score `tools/call`, forward survivors to the upstream
-ToolServer, return an MCP error on block.
+DriftWatch registers as Kagent's `RemoteMCPServer` and acts as an MCP proxy/mediator — but
+it does **not** hand-roll the protocol. It uses the **official MCP Python SDK / FastMCP**:
+`FastMCP.as_proxy()` for the server↔upstream proxy, and an `on_call_tool` middleware hook to
+score each call before forwarding. See `e7-mcp-proxy-design.md` for the detailed plan.
 
-**What we'd build:** `interceptor/mcp.py` (pure JSON-RPC↔engine mapping) + `mcp_proxy.py`
-(transport server, upstream forwarding) + MCP e2e. (This is exactly what was drafted/paused.)
+**What we'd build:** a FastMCP proxy + one enforcement middleware class
+(`on_call_tool` → `Interceptor.handle()` → forward or `ToolError`) + a tiny pure
+name/args→engine-dict mapping + fake-upstream unit tests. No hand-written JSON-RPC/transport.
 
 **Pros**
 - No dependency on agentgateway — DriftWatch is self-contained.
-- Full control of the wire behavior.
 - **DriftWatch sees the whole MCP session**, so per-session decision-chain state lives
-  exactly where the thesis needs it — at the hop, in DriftWatch. This is the cleanest home
-  for chain-aware enforcement and is the strongest reason to keep A as the reference path.
+  exactly where the thesis needs it — at the hop, in DriftWatch. The SDK exposes the session
+  (`context.fastmcp_context.session_id`) so chain correlation is native here, not something a
+  gateway must be coaxed into forwarding. This is the strongest reason to keep A as the
+  reference path.
+- Transport is the library's job (JSON-RPC, `tools/list`, Streamable HTTP, sessions, error
+  mapping) — we own only the scoring middleware.
 
 **Cons**
-- **We re-implement MCP transport** — JSON-RPC framing, `tools/list` passthrough, upstream
-  forwarding, and (for real Kagent) MCP Streamable-HTTP: SSE streaming + session lifecycle.
-  That surface is real work and easy to get subtly wrong; it is not DriftWatch's value-add.
-  (Mitigated by the pure-mapping split — the fiddly JSON-RPC↔engine bit is unit-testable —
-  and by scoping v1alpha1 to the JSON-RPC-over-POST core, deferring SSE/session polish.)
-- DriftWatch has to present as a ToolServer/proxy and track the MCP spec over time.
+- Adds an MCP SDK dependency (opt-in extra) and a real MCP runtime to operate.
+- A full proxy is still not trivial even with the SDK — session lifecycle, streaming
+  responses, and upstream reconnect need care; but this is library-supported, not
+  hand-rolled, which is the key difference from the original draft.
 
 ---
 
@@ -98,7 +101,9 @@ its adapter — so single-process accumulation exists; what E7 needs is to **key
 caller** so two concurrent agents don't share one chain.
 
 - **Option A:** DriftWatch sees the whole MCP session, so it can hold per-session chain
-  state itself. Chain-aware enforcement is native.
+  state itself. Chain-aware enforcement is native — the MCP SDK exposes the session id
+  (`context.fastmcp_context.session_id`) in the `on_call_tool` middleware, so keying chains
+  per caller is built in, not bolted on.
 - **Option B:** agentgateway must pass a stable correlation id (session/agent) in the
   ext_authz request so DriftWatch can bucket calls into the right chain. This **must be
   confirmed** against agentgateway's ext_authz request contract before B can be primary.
@@ -149,7 +154,9 @@ deterministic demo, exactly as today.
 
 ## What carries across both options
 
-The pure mapping (MCP JSON-RPC ↔ engine dict) is reusable in B too if agentgateway is
-configured to forward the raw JSON-RPC body to ext_authz. So step 2 above (the `to_engine_call`
-mapping) is not wasted regardless of which topology ships — it is the shared seam between the
-reference proxy and the gateway pattern.
+The pure name/args → engine-dict mapping is reusable in B too if agentgateway forwards the
+raw `tools/call` body to ext_authz. So that small mapping helper is not wasted regardless of
+which topology ships — it is the shared seam between the reference proxy (A, where it sits in
+the `on_call_tool` middleware) and the gateway pattern (B, where it adapts the ext_authz
+body). The transport itself differs: A delegates it to the MCP SDK, B delegates it to
+agentgateway — in neither option do we hand-roll JSON-RPC.
