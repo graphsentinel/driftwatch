@@ -90,7 +90,14 @@ rebuild/republish to bring the public image in sync with the repo. **Still roadm
 Helm-managed sidecar injection (mutating webhook) — until then the supported wiring is the
 manual fragment in `deploy/sidecar-manual.yaml`.
 
-**Roadmap:** governing a real Helm-installed Kagent at the MCP hop (path B / E7), live
+**Path B (real MCP tool servers) — E7/E8 implemented, validated in-cluster:** the chain-aware
+MCP proxy (E7) governs a *real* Kubernetes-facing MCP ToolServer (`containers/kubernetes-mcp-server`)
+on k3d (E8) — within-baseline reads forwarded to the cluster, a destructive `pods_delete`
+blocked before the upstream, and a right-tools-wrong-order chain caught as a transition drift
+(see `Docs/e7-real-upstream-plan.md`). **Still roadmap (E9):** driving it from a *real Kagent*
+agent via a `RemoteMCPServer` CR (gated on a Kagent install + model key).
+
+**Roadmap:** the E9 real-Kagent client integration above, live
 multi-provider model-panel polling for consensus seeding, and a Go/controller-runtime
 rewrite once the CRD contract stabilizes.
 
