@@ -97,5 +97,35 @@ def test_cold_start_failclosed_blocks():  # TC-F-04 at runtime
     assert v.outcome == BLOCK
 
 
+# --- HTTP layer (server.py) — guards the FastAPI wiring the image actually runs ---
+
+def _client():
+    pytest.importorskip("fastapi")   # skip if interceptor extra not installed
+    pytest.importorskip("httpx")     # TestClient needs httpx
+    from fastapi.testclient import TestClient
+
+    from driftwatch.interceptor.server import build_app
+    adapter = KagentAdapter(task_type="investigate_latency")
+    adapter.observe({"tool": "QueryMetrics", "namespace": "checkout"})  # normal first call
+    return TestClient(build_app(Interceptor(_ready_store(), adapter, action="block")))
+
+
+def test_http_healthz():
+    assert _client().get("/healthz").json() == {"status": "ok"}
+
+
+def test_http_tool_call_accepts_json_body_and_blocks():  # regression: was 422 (Response treated as query param)
+    # the drifting call must reach the engine (not be rejected by request parsing)
+    r = _client().post("/v1/tool-call", json={"tool": "DeleteNamespace", "namespace": "checkout"})
+    assert r.status_code == 403
+    assert r.json()["outcome"] == "block"
+
+
+def test_http_tool_call_forwards_within_baseline():
+    r = _client().post("/v1/tool-call", json={"tool": "QueryLogs", "namespace": "checkout"})
+    assert r.status_code == 200
+    assert r.json()["outcome"] == "forward"
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))

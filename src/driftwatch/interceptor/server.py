@@ -10,20 +10,26 @@ from .engine import Interceptor
 
 
 def build_app(interceptor: Interceptor):  # pragma: no cover - needs fastapi
-    from fastapi import FastAPI, Response
+    from fastapi import Body, FastAPI
+    from fastapi.responses import JSONResponse
 
     app = FastAPI(title="driftwatch-interceptor")
 
     @app.post("/v1/tool-call")
-    def tool_call(payload: dict, response: Response):
+    def tool_call(payload: dict = Body(...)):
+        # NOTE: `response: Response` injection breaks under `from __future__ import
+        # annotations` (FastAPI sees the stringized type as a query param), so set the
+        # status via JSONResponse instead — robust regardless of annotation evaluation.
         verdict = interceptor.handle(payload)
-        response.status_code = verdict.http_status
-        return {
-            "outcome": verdict.outcome,
-            "gate_action": getattr(verdict.decision, "gate_action", None),
-            "anomaly_kind": getattr(verdict.decision, "anomaly_kind", None),
-            "signals": verdict.signals,
-        }
+        return JSONResponse(
+            status_code=verdict.http_status,
+            content={
+                "outcome": verdict.outcome,
+                "gate_action": getattr(verdict.decision, "gate_action", None),
+                "anomaly_kind": getattr(verdict.decision, "anomaly_kind", None),
+                "signals": verdict.signals,
+            },
+        )
 
     @app.get("/healthz")
     def healthz():
