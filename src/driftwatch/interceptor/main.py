@@ -30,7 +30,10 @@ def _load_baseline(window: int) -> BaselineStore:
     """
     if os.environ.get("DRIFTWATCH_DATA_DIR"):
         try:
-            return SqliteBackend().load(window=window)
+            # read_only: the sidecar mounts the operator's baseline read-only and must not
+            # write (no mkdir / CREATE TABLE) — that would fail on a readOnly mount. A
+            # missing db (operator hasn't seeded yet) raises here -> safe cold-start below.
+            return SqliteBackend(read_only=True).load(window=window)
         except Exception:
             return MemoryBackend().load(window=window)
     return MemoryBackend().load(window=window)

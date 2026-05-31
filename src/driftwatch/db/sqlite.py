@@ -25,12 +25,20 @@ def _default_db_path() -> str:
 
 
 class SqliteBackend:
-    def __init__(self, path: str | None = None):
+    def __init__(self, path: str | None = None, read_only: bool = False):
+        # read_only is for the interceptor sidecar (FR-10): it mounts the operator-written
+        # baseline on a read-only volume and must NOT create dirs/tables or open the db
+        # for writing — doing so fails on a readOnly mount and would silently cold-start.
         self.path = path or _default_db_path()
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self.read_only = read_only
+        if not read_only:
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+            self._init_schema()
 
     def _conn(self) -> sqlite3.Connection:
+        if self.read_only:
+            # mode=ro: open existing db read-only; raises if the file is absent (cold start)
+            return sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
         return sqlite3.connect(self.path)
 
     def _init_schema(self) -> None:
@@ -48,6 +56,8 @@ class SqliteBackend:
         return store
 
     def save(self, store: BaselineStore) -> None:
+        if self.read_only:
+            raise RuntimeError("SqliteBackend opened read_only cannot save (sidecar path)")
         with self._conn() as cx:
             for task_type, b in store._baselines.items():
                 cx.execute(

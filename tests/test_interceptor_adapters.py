@@ -174,3 +174,61 @@ def test_sidecar_cold_start_when_no_store(monkeypatch):  # FR-10 cold-start path
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_sidecar_reads_baseline_from_readonly_store(tmp_path, monkeypatch):  # TC-F-21 (unit)
+    """Sidecar loads the operator baseline from a READ-ONLY store mount, not cold-start.
+
+    Simulates the in-cluster readOnly PVC: after the operator writes the baseline the data
+    dir is made read-only, so a *writing* SqliteBackend (mkdir / CREATE TABLE) would fail.
+    build_default_interceptor must still load it via the read_only path and enforce.
+    """
+    import os
+    import stat
+
+    import driftwatch.interceptor.main as main
+    from driftwatch.operator.policy import validate
+    from driftwatch.operator.reconcile import Reconciler
+    from driftwatch.sdk.observation import DecisionChain, ToolCall
+
+    monkeypatch.setenv("DRIFTWATCH_DATA_DIR", str(tmp_path))
+    spec = {
+        "action": "block",
+        "baseline": {"sources": ["successfulRuns"], "window": 10},
+        "detection": {"features": ["tool", "scope", "sequence", "argSchemaHash"]},
+    }
+    rec = Reconciler(validate({**spec, "_name": "p"}), persistent=True)
+    for _ in range(4):
+        ch = DecisionChain(task_type="investigate_latency")
+        ch.add(ToolCall(tool="QueryMetrics", scope="ns/app"))
+        ch.add(ToolCall(tool="QueryLogs", scope="ns/app"))
+        rec.observe(ch, source="successfulRuns")
+
+    # make the data dir tree read-only (owner loses write) to mimic a readOnly mount
+    paths = []
+    for root, _dirs, files in os.walk(str(tmp_path)):
+        for f in files:
+            paths.append(os.path.join(root, f))
+        paths.append(root)
+    for f in [p for p in paths if os.path.isfile(p)]:
+        os.chmod(f, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    for d in [p for p in paths if os.path.isdir(p)]:
+        os.chmod(d, stat.S_IRUSR | stat.S_IXUSR)
+
+    try:
+        itc = main.build_default_interceptor()
+        base = itc.store.get("investigate_latency")
+        assert base.ready, "sidecar cold-started instead of loading the read-only baseline"
+        assert "QueryMetrics" in base.expected_tools
+        assert itc.handle(
+            {"tool": "DeleteNamespace", "namespace": "ns/app"}
+        ).outcome in ("block", "drop")
+        assert itc.handle(
+            {"tool": "QueryMetrics", "namespace": "ns/app"}
+        ).outcome == "forward"
+    finally:
+        # restore perms so pytest can clean up tmp_path
+        for d in [p for p in paths if os.path.isdir(p)]:
+            os.chmod(d, stat.S_IRWXU)
+        for f in [p for p in paths if os.path.isfile(p)]:
+            os.chmod(f, stat.S_IRUSR | stat.S_IWUSR)
