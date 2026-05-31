@@ -30,9 +30,9 @@ to Kyverno/OPA, not a replacement.
 | `src/driftwatch/interceptor/` | data-plane sidecar |
 | `config/` | general reference — `otel-targets.yaml` (the OTLP-endpoint / decoupling reference) |
 | `deploy/` | Helm chart + raw CRD manifest + [install guide](deploy/README.md) |
-| `evaluation/` | dataset + `make eval` harness |
-| `examples/k3d-cluster-demo/` | self-contained demo — compose, k3d/collector/prometheus config, `manifests/` (policies + agents), own `Makefile` |
-| `tests/` · `Docs/` | functional suite (TC-F-*) · architecture, adapter guide, FP-tuning, GHCR publishing |
+| `evaluation/` | dataset + `make eval` harness (writes `results/`, git-ignored) |
+| `examples/k3d-cluster-demo/` | self-contained demo — compose, k3d/collector/prometheus + `grafana/` provisioning, `manifests/` (policies + stand-in agents), `SETUP_RUNBOOK.md`, own `Makefile` |
+| `tests/` · `Docs/` | functional suite (TC-F-*) · architecture, adapter guide, FP-tuning, GHCR publishing, consensus/MCP-proxy plan |
 
 ## Quick start
 
