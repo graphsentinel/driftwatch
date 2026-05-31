@@ -7,6 +7,7 @@ for Postgres by reimplementing this one class.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -15,10 +16,18 @@ from ..library.ngram import NGramModel
 from ..library.zscore import StreamingZScore
 
 
+def _default_db_path() -> str:
+    # Base dir is configurable so the operator (non-root, read-only-ish workdir) writes
+    # to a mounted writable volume. DRIFTWATCH_DATA_DIR is set by the Helm chart to an
+    # emptyDir mount; falls back to a working-dir-relative "data/" for local/dev runs.
+    base = os.environ.get("DRIFTWATCH_DATA_DIR", "data")
+    return str(Path(base) / "baselines" / "driftwatch.db")
+
+
 class SqliteBackend:
-    def __init__(self, path: str = "data/baselines/driftwatch.db"):
-        self.path = path
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, path: str | None = None):
+        self.path = path or _default_db_path()
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
     def _conn(self) -> sqlite3.Connection:

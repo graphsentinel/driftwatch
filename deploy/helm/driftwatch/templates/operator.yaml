@@ -20,4 +20,12 @@ spec:
           env:
             - name: DRIFTWATCH_OTLP_ENDPOINT
               value: "{{ .Values.otel.endpoint }}"
+            - name: DRIFTWATCH_DATA_DIR
+              value: "/data"          # writable volume for the sqlite baseline store
+          volumeMounts:
+            - name: data
+              mountPath: /data
           resources: {{- toYaml .Values.operator.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}                # baselines are rebuilt from runs; persistence is per-pod
