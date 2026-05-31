@@ -21,12 +21,13 @@ def _key(namespace: str, name: str) -> str:
 
 
 def run() -> None:  # console entry point: driftwatch-operator
-    import sys
-
+    # Importing THIS module already registered the @kopf handlers below, so run the
+    # embedded operator directly. (The old kopf.cli.main() raised AttributeError:
+    # `import kopf` does not auto-import the kopf.cli submodule.) standalone=True keeps
+    # the single-operator, no-peering posture the CLI `--standalone` flag intended.
     import kopf
 
-    sys.argv = ["kopf", "run", "--standalone", __file__]
-    kopf.cli.main()
+    kopf.run(standalone=True)
 
 
 try:  # register handlers only when kopf is available

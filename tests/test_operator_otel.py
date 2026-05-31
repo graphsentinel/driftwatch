@@ -80,5 +80,19 @@ def test_otel_schema_conformance():  # TC-F-08
     assert event["gen_ai.evaluation.score.label"] in {"low", "medium", "high", "critical"}
 
 
+def test_operator_run_invokes_kopf_run(monkeypatch):
+    # Regression: run() called kopf.cli.main(), but `import kopf` does not auto-import
+    # the kopf.cli submodule, so the operator CrashLoopBackOff'd at startup with
+    # "module 'kopf' has no attribute 'cli'". Guard that run() uses the embedded
+    # kopf.run() instead.
+    kopf = pytest.importorskip("kopf")
+    from driftwatch.operator import main as opmain
+
+    called = {}
+    monkeypatch.setattr(kopf, "run", lambda *a, **k: called.update(a=a, k=k))
+    opmain.run()
+    assert called.get("k", {}).get("standalone") is True
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))
