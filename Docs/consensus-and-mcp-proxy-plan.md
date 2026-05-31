@@ -39,11 +39,39 @@ existing `Reconciler.seed_from_models()`.
   network dependency at reconcile time.
 - Models come from `Policy.model_seed` (the CRD `baseline.sources: [{models: [...]}]`).
 
+**Model providers (multi-provider, not Ollama-only).** The panel may mix local models and
+hosted APIs. A provider-agnostic client interface keeps the consensus logic identical
+regardless of where a model lives — only auth/transport differs:
+
+```
+ConsensusModelClient (ABC)        # one method: propose(task_prompt) -> raw tool list
+├── OllamaClient                  # OLLAMA_HOST (default localhost:11434), /api/generate
+│                                 #   covers local + ollama.com *-cloud models
+├── OpenAICompatClient            # base_url + Bearer token, /v1/chat/completions
+│                                 #   covers OpenAI, RunPod, vLLM, Together, most hosts
+├── AnthropicClient               # Claude — x-api-key header, /v1/messages
+└── GeminiClient                  # Gemini — key param or OpenAI-compat endpoint
+```
+
+- **Auth/secrets**: never in the CRD. Bearer/API keys come from env or a mounted
+  K8s Secret (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `RUNPOD_API_KEY`,
+  …) — read by the offline seeding CLI, which is where the LLM calls happen. The operator
+  pod still never calls an LLM, so no model credentials live in the cluster control plane.
+- **Model addressing in the CRD**: a `models:` entry is either a bare name (resolved
+  against a default provider, e.g. Ollama) or `provider/model` (e.g. `openai/gpt-4o`,
+  `anthropic/claude-sonnet-4-6`, `runpod/<endpoint>`, `ollama/qwen3.5:4b`). The provider
+  prefix selects the client; the rest is the model id.
+- **Consensus stays provider-blind**: every client returns the same normalized chain
+  shape, so majority aggregation (T-C2) treats an OpenAI vote and an Ollama vote
+  identically — one model, one vote. (Still not capability-weighted.)
+
 ### Tasks
-- **T-C1** — `consensus/runner.py`: Ollama client (`OLLAMA_HOST`, default
-  `localhost:11434`). For each (task, model) request a tool-call list; parse into a
-  `DecisionChain` via the existing adapter/fingerprint. Local and `*-cloud` models both
-  go through `/api/generate`.
+- **T-C1** — `consensus/runner.py`: the `ConsensusModelClient` interface above + the four
+  clients. For each (task, model) request a tool-call list; parse into a `DecisionChain`
+  via the existing adapter/fingerprint. Ollama (local + `*-cloud`) needs no key;
+  OpenAI/RunPod/Anthropic/Gemini read a Bearer/API key from env or mounted Secret.
+  Network/auth failures for one provider degrade gracefully (that model abstains; the
+  others still vote) and are recorded in provenance.
 - **T-C2** — `consensus/aggregate.py`: pure, cluster-free, Ollama-free. Input
   `{task -> {model -> [chains]}}` → one synthesized **consensus `DecisionChain`** per task
   with only majority tools/transitions/scopes. The only new detection logic; fully
@@ -118,4 +146,8 @@ CFP E7 section + test catalog).
 - Not new CFP scope — FR-9 and E7 were always in the proposal; this implements them.
 - Not retraining/fine-tuning — DriftWatch only *reads* models' proposed chains.
 - Not capability-weighted — majority, so it doesn't contradict the inverse-scaling finding.
-- Not operator-embedded LLM calls — seeding is offline; the operator stays LLM-free.
+- Not operator-embedded LLM calls — seeding is offline; the operator stays LLM-free, so
+  no model API keys ever live in the cluster control plane.
+- Not Ollama-only — the panel mixes local (Ollama) and hosted bearer-token providers
+  (OpenAI/RunPod/vLLM via OpenAI-compat, Anthropic, Gemini) behind one client interface;
+  consensus is provider-blind (one model = one vote regardless of host).
