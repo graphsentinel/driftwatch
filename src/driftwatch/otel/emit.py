@@ -64,8 +64,14 @@ class Emitter:
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+            # The collector listens on plaintext gRPC; the OTLP exporter defaults to TLS
+            # (a bare host:port then fails with SSL WRONG_VERSION_NUMBER). Use insecure
+            # unless the endpoint explicitly opts into TLS via an https:// scheme.
+            insecure = not endpoint.startswith("https://")
             provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
-            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+            provider.add_span_processor(
+                BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=insecure))
+            )
             trace.set_tracer_provider(provider)
             self._tracer = trace.get_tracer("driftwatch")
         except Exception:

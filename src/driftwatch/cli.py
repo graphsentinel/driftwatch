@@ -93,11 +93,19 @@ def run_demo(scenario: str) -> int:
     task, normal, attack, expect_kind, action = SCENARIOS[scenario]
     store = _baseline_store(task, normal)
 
+    import os
+
     from .adapters import KagentAdapter
+    from .otel.emit import Emitter
     # give the adapter the same catalog the baseline was built with, so category/risk
     # match — otherwise an un-enriched attack call trips risk-escalation spuriously.
     adapter = KagentAdapter(task_type=task, catalog=CATALOG)
-    itc = Interceptor(store, adapter, threshold=3.0, action=action)
+    # OTLP is opt-in: with DRIFTWATCH_OTLP_ENDPOINT set, the span + evaluation event go to
+    # the collector (Grafana/Jaeger); unset, the Emitter stays a pure dict builder and the
+    # demo prints its console summary — so it runs anywhere, tests included.
+    endpoint = os.environ.get("DRIFTWATCH_OTLP_ENDPOINT") or None
+    itc = Interceptor(store, adapter, threshold=3.0, action=action,
+                      emitter=Emitter(endpoint=endpoint))
 
     print(f"\n=== demo: {scenario}  (task={task}, action={action}) ===")
     verdict = None
