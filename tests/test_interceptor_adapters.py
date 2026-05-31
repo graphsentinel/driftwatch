@@ -220,12 +220,18 @@ def test_sidecar_reads_baseline_from_readonly_store(tmp_path, monkeypatch):  # T
         base = itc.store.get("investigate_latency")
         assert base.ready, "sidecar cold-started instead of loading the read-only baseline"
         assert "QueryMetrics" in base.expected_tools
-        assert itc.handle(
-            {"tool": "DeleteNamespace", "namespace": "ns/app"}
-        ).outcome in ("block", "drop")
+        # the default adapter has task_type="" so calls score under the wrong baseline;
+        # point it at the seeded task (the real sidecar's adapter is task-scoped) and reset
+        # between calls so each is judged as its own chain, like a fresh tool-call hop.
+        itc.adapter = KagentAdapter(task_type="investigate_latency")
+        itc.adapter.reset()
         assert itc.handle(
             {"tool": "QueryMetrics", "namespace": "ns/app"}
         ).outcome == "forward"
+        itc.adapter.reset()
+        assert itc.handle(
+            {"tool": "DeleteNamespace", "namespace": "ns/app"}
+        ).outcome in ("block", "drop")
     finally:
         # restore perms so pytest can clean up tmp_path
         for d in [p for p in paths if os.path.isdir(p)]:
