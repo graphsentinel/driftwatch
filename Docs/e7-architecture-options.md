@@ -22,9 +22,10 @@ Kagent agent pod ──MCP──> DriftWatch MCP proxy ──MCP──> real MCP
 ```
 
 DriftWatch registers as Kagent's `RemoteMCPServer` and acts as an MCP proxy/mediator — but
-it does **not** hand-roll the protocol. It uses the **official MCP Python SDK / FastMCP**:
-`FastMCP.as_proxy()` for the server↔upstream proxy, and an `on_call_tool` middleware hook to
-score each call before forwarding. See `e7-mcp-proxy-design.md` for the detailed plan.
+it does **not** hand-roll the protocol. It builds on an MCP library (FastMCP): proxy support
+(e.g. `create_proxy(...)`, exact API pinned at implementation) for the server↔upstream proxy,
+and an `on_call_tool`-style middleware hook to score each call before forwarding. See
+`e7-mcp-proxy-design.md` for the detailed plan and package/version caveats.
 
 **What we'd build:** a FastMCP proxy + one enforcement middleware class
 (`on_call_tool` → `Interceptor.handle()` → forward or `ToolError`) + a tiny pure
@@ -33,10 +34,10 @@ name/args→engine-dict mapping + fake-upstream unit tests. No hand-written JSON
 **Pros**
 - No dependency on agentgateway — DriftWatch is self-contained.
 - **DriftWatch sees the whole MCP session**, so per-session decision-chain state lives
-  exactly where the thesis needs it — at the hop, in DriftWatch. The SDK exposes the session
-  (`context.fastmcp_context.session_id`) so chain correlation is native here, not something a
-  gateway must be coaxed into forwarding. This is the strongest reason to keep A as the
-  reference path.
+  exactly where the thesis needs it — at the hop, in DriftWatch. The library exposes the
+  session in middleware (prefer `session_id`, fall back to client id / headers / a task
+  header), so chain correlation is available in-process — not something a gateway must be
+  coaxed into forwarding. This is the strongest reason to keep A as the reference path.
 - Transport is the library's job (JSON-RPC, `tools/list`, Streamable HTTP, sessions, error
   mapping) — we own only the scoring middleware.
 
@@ -101,9 +102,10 @@ its adapter — so single-process accumulation exists; what E7 needs is to **key
 caller** so two concurrent agents don't share one chain.
 
 - **Option A:** DriftWatch sees the whole MCP session, so it can hold per-session chain
-  state itself. Chain-aware enforcement is native — the MCP SDK exposes the session id
-  (`context.fastmcp_context.session_id`) in the `on_call_tool` middleware, so keying chains
-  per caller is built in, not bolted on.
+  state itself. The library exposes the session in `on_call_tool` middleware — prefer
+  `session_id`, fall back to client id / headers / a task header (it can be absent in some
+  phases), keying chains per caller in-process. Shared baseline/policy/emitter, per-session
+  adapter/chain only.
 - **Option B:** agentgateway must pass a stable correlation id (session/agent) in the
   ext_authz request so DriftWatch can bucket calls into the right chain. This **must be
   confirmed** against agentgateway's ext_authz request contract before B can be primary.

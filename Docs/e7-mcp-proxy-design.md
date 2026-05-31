@@ -10,22 +10,32 @@
 **Status: design only.** This doc is the plan so the implementation, when it lands, is
 mechanical and grounded in what already exists.
 
-## Don't hand-roll MCP transport — use the official SDK / FastMCP
+## Don't hand-roll MCP transport — use an MCP library (FastMCP)
 
 The earlier draft of this doc proposed writing JSON-RPC framing, `tools/list` passthrough,
 and upstream forwarding by hand (`interceptor/mcp.py` + `mcp_proxy.py`). **That was wrong** —
 the fragile part (the protocol) is exactly what a maintained library should own. DriftWatch
-is Python, so use the **official MCP Python SDK** (`mcp` on PyPI) and its ergonomic
-**FastMCP** layer, which already provide:
+is Python, so build on an MCP library rather than the wire.
+
+**Package choice (pin at implementation).** Two ecosystems exist and must not be conflated:
+the **official `mcp` SDK** (PyPI `mcp`, the `modelcontextprotocol/python-sdk`) and the
+separate ergonomic **`fastmcp`** package (PyPI `fastmcp`, Jeremiah Lowin), which is where the
+proxy + middleware ergonomics below live. The plan targets **`fastmcp`** for the
+proxy/middleware seam; the exact package split, import paths, and minimum versions
+(`create_proxy`, the middleware base, the session/context API) MUST be verified against the
+installed version before coding — treat every API name here as indicative, not pinned.
+
+What the library gives us:
 
 - **Streamable HTTP** transport (the recommended prod transport; SSE is deprecated).
-- A **proxy/mediator** primitive (`FastMCP.as_proxy()` / `create_proxy()`) — DriftWatch can
-  be an MCP **server** to Kagent and an MCP **client** to the upstream ToolServer at once,
-  with `tools/list`, session lifecycle, streaming, and error mapping handled by the library.
-- **Middleware** with an `on_call_tool(self, context, call_next)` hook — the exact seam to
+- A **proxy/mediator** primitive — e.g. `create_proxy(...)` (exact API pinned during
+  implementation) — so DriftWatch can be an MCP **server** to Kagent and an MCP **client** to
+  the upstream ToolServer at once, with `tools/list`, session lifecycle, streaming, and error
+  mapping handled by the library.
+- **Middleware** with an `on_call_tool(self, context, call_next)`-style hook — the seam to
   insert DriftWatch scoring before a call is forwarded upstream.
 
-So E7 becomes: a FastMCP proxy + one middleware class that calls the existing
+So E7 becomes: a library-provided MCP proxy + one middleware class that calls the existing
 `Interceptor`. No hand-written transport. The detection core is unchanged —
 `Interceptor.handle(dict) -> Verdict`, scoring against the operator-reconciled baseline
 (FR-10 shared store).
@@ -43,6 +53,7 @@ Kagent agent pod ──MCP──> DriftWatch (FastMCP proxy + middleware) ──
                           on_call_tool: Interceptor.handle()
                           forward => upstream result
                           block   => ToolError (never reaches upstream)
+                          drop    => synthetic empty result (upstream NOT called)
 ```
 
 Because DriftWatch terminates the MCP session as a server, it sees the whole session and can
@@ -50,12 +61,13 @@ hold **per-session decision-chain state** itself — the chain-aware thesis, nat
 
 ## What to build
 
-### T-E7.1 — FastMCP proxy/mediator (no hand-rolled JSON-RPC)
+### T-E7.1 — MCP proxy/mediator via the library (no hand-rolled JSON-RPC)
 
-A proxy app built with the official SDK / FastMCP: an MCP server (facing Kagent) backed by
-an MCP client to the upstream ToolServer (`FastMCP.as_proxy(<upstream>)`). The upstream URL
-comes from config (`DRIFTWATCH_UPSTREAM_MCP`). `tools/list` and non-tool methods are handled
-by the proxy automatically (passthrough) — DriftWatch only governs `tools/call`.
+A proxy app built with the MCP library: an MCP server (facing Kagent) backed by an MCP
+client to the upstream ToolServer — use FastMCP proxy support, e.g. `create_proxy(...)`
+(exact API pinned during implementation). The upstream URL comes from config
+(`DRIFTWATCH_UPSTREAM_MCP`). `tools/list` and non-tool methods are handled by the proxy
+automatically (passthrough) — DriftWatch only governs `tools/call`.
 
 ### T-E7.2 — DriftWatch enforcement middleware (`on_call_tool`)
 
@@ -65,23 +77,39 @@ A `Middleware` subclass whose `on_call_tool(self, context, call_next)`:
    (`{"tool", "namespace"<-args.namespace/scope, "args"}`) — a tiny pure helper, the only
    bit worth unit-testing in isolation,
 3. `verdict = interceptor.handle(that_dict)` against the per-session chain (T-E7.3),
-4. **forward** (within baseline / log / shadow) → `return await call_next(context)` (the
-   call proceeds to the upstream ToolServer);
-   **block** → `raise ToolError(...)` with the drift reason + score, so the call never
-   reaches the upstream and the agent sees *why*. (Drop, like the sidecar, is a no-op posture
-   — at the MCP hop we forward so the agent gets a well-formed response; block is the deny.)
+4. map the verdict to an MCP outcome:
+   - **forward** (within baseline / log / shadow) → `return await call_next(context)` (the
+     call proceeds to the upstream ToolServer and its real result is returned);
+   - **block** → `raise ToolError(...)` with the drift reason + score, so the call never
+     reaches the upstream and the agent sees *why*;
+   - **drop** → **do NOT call `call_next`** (the upstream is never invoked) and return a
+     synthetic benign/empty result. Drop must stay distinct from both forward and block: it
+     suppresses the side effect without surfacing an error. (Forwarding on drop would collapse
+     drop into log/allow, which is wrong — drop's whole point is "don't let it happen, but
+     don't error".) The exact empty/benign MCP result shape is pinned at implementation.
 
-Reuse `build_default_interceptor()` so policy/baseline come from the same env + shared-store
-path as the sidecar (FR-10) — the proxy is just a different front door to the same engine.
+The chain is still updated on drop (the call was observed), so sequence state stays correct
+for the next call. Reuse the same engine wiring as the sidecar (shared baseline + policy from
+the FR-10 env + shared-store path); see T-E7.3 for what is shared vs per-session.
 
 ### T-E7.3 — Chain correlation (per session/agent/task)
 
 DriftWatch scores ordered **chains**, not isolated calls, so calls must accumulate into the
-right chain. FastMCP middleware exposes session via `context.fastmcp_context.session_id`
-(and HTTP headers via `get_http_headers()` for an agent/task identity). Key a per-caller
-`Interceptor`/adapter chain by that id so two concurrent agents don't share a chain. This is
-the design item the consultant flagged — and the SDK gives us the key natively (unlike the
-Option-B ext_authz path, where agentgateway must forward it).
+right chain, keyed per caller so two concurrent agents don't share one chain.
+
+**Correlation key (prefer, then fall back).** The MCP session id is the natural key, but it
+is not guaranteed in every middleware phase (it can be absent/None, e.g. during init), so
+don't assume it: **prefer the MCP `session_id`; fall back to a client id / HTTP headers /
+an explicit task header; if no stable key can be derived, fail closed (or run a documented
+degraded per-call mode), never silently merge unrelated callers into one chain.** This is
+the design item the consultant flagged — A still has the advantage that the key is available
+in-process at the hop, whereas Option B depends on agentgateway forwarding one.
+
+**What is shared vs per-session.** Do NOT clone the whole engine per session. Share one
+**baseline store**, one **policy**, and one **emitter** across all sessions (read-mostly);
+keep only the **adapter / chain state** per session (a small per-key object that accumulates
+that caller's `DecisionChain`). So scoring reads the shared baseline but appends to the
+caller's own chain — cheap, and correct under concurrency.
 
 ### T-E7.4 — Unit tests with a fake upstream MCP server
 
@@ -135,7 +163,7 @@ Feature: MCP-proxy enforcement against the reconciled baseline (E7, path B)
 ## Boundaries (what E7 is NOT)
 
 - Not new detection logic — same `Interceptor.handle` + `score_chain` + baseline.
-- Not hand-rolled transport — the official MCP SDK / FastMCP owns JSON-RPC, `tools/list`,
+- Not hand-rolled transport — the MCP library (FastMCP) owns JSON-RPC, `tools/list`,
   streaming, sessions, error mapping.
 - Not a replacement for path A's demo — the in-process `make demo` + stand-in sidecar stay
   the deterministic, dependency-free demo/fallback. E7 is the *real-Kagent* path.
@@ -146,7 +174,7 @@ Feature: MCP-proxy enforcement against the reconciled baseline (E7, path B)
 
 Across the remaining roadmap: **FR-9 `runner.py`** (live model panel for consensus) →
 **webhook sidecar injector** → **E7 (this doc)**. Within E7, the near-term, cluster-free
-work is T-E7.1–T-E7.4 (FastMCP proxy + middleware + chain keying + fake-upstream unit tests);
+work is T-E7.1–T-E7.4 (MCP-library proxy + middleware + chain keying + fake-upstream unit tests);
 T-E7.5 (real Kagent e2e) is gated on the cluster pieces. The Option-B spike
 (`e7-architecture-options.md`) runs in parallel and decides whether the gateway pattern can
 also be a primary production topology.
