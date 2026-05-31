@@ -223,54 +223,6 @@ the official MCP SDK / **FastMCP** — DriftWatch adds only scoring middleware, 
 The root is **library + contracts**; the operator and interceptor/proxy are thin deployables
 around the shared detection core; every runnable story is a self-contained `examples/<case>/`.
 
-```
-src/driftwatch/
-├── library/        SHARED detection core — operator AND data plane both import this
-│   ├── fingerprint.py   (tool, scope, argSchemaHash) extraction
-│   ├── ngram.py         sequence n-gram model
-│   ├── zscore.py        streaming z-score (raw z + normalized [0,1])
-│   ├── baseline.py      per-task baseline build/aggregate (window, mean)
-│   ├── decision.py      score → anomaly.kind + gate.action
-│   └── scaling.py       OLS inverse-scaling (β₁ > 0 ⇒ bigger ≠ safer)
-├── sdk/            PUBLIC, versioned contract for adapter authors
-│   └── observation.py   ToolCall + DecisionChain + RuntimeAdapter base/registry
-├── adapters/       built-in runtime adapters (declared in spec.runtimes)
-│   ├── kagent.py · goose.py     built-ins — one policy governs both
-│   └── custom_example.py        reference for the `custom` path (FR-8)
-├── db/             baseline persistence behind one interface
-│   ├── store.py · memory.py · sqlite.py   (memory for CI/dev; sqlite persistent)
-├── consensus/      multi-model cold-start seeding (FR-9) — aggregate.py · seed.py
-├── otel/           gen_ai.agent.* emission (Observability Summit semconv)
-│   ├── attributes.py    constants, verbatim from upstream
-│   └── emit.py          span attrs + gen_ai.evaluation.result event
-├── operator/       CONTROL PLANE (Kopf): watches AgentDriftPolicy
-│   ├── main.py          Kopf handlers (validate / create / update / delete)
-│   ├── policy.py        cluster-free spec validation
-│   └── reconcile.py     Reconciler → BaselineStore + status
-├── interceptor/    DATA PLANE
-│   ├── engine.py        score live chain, apply action
-│   ├── server.py        FastAPI sidecar (HTTP hop — path A)
-│   ├── main.py          `driftwatch-interceptor` entrypoint
-│   ├── mcp_proxy.py     chain-aware MCP proxy (path B) — `driftwatch-mcp` entrypoint
-│   └── mcp_mapping.py   pure MCP tools/call → engine-call mapping
-├── graph/          decision-graph forensics (Neo4j) — roadmap stub
-├── cli.py          `driftwatch demo <scenario>` + `eval`
-└── evaluation_runner.py   recall / FP-rate / p95 / inverse-scaling
-
-config/             general reference — otel-targets.yaml (the OTLP/decoupling ref)
-deploy/
-├── helm/driftwatch/    Helm chart: crd · operator · rbac · pvc · mcp-proxy · sidecar-injector
-├── crd/agentdriftpolicy.yaml   raw CRD manifest (kubectl apply, no Helm)
-└── sidecar-manual.yaml         manual interceptor sidecar fragment
-evaluation/         datasets/drift.jsonl (TC-D-*) + results/ (git-ignored)
-examples/k3d-cluster-demo/   the 5 live scenarios — own Makefile, compose obs stack,
-                             manifests/ (policies + stand-in agents + remotemcpserver),
-                             fr10-e2e.sh, e7-kagent-e2e.sh, runbooks
-tests/              TC-F-* functional suite (pytest)
-Docs/               architecture · adapter-guide · fp-tuning · publishing-ghcr ·
-                    e7-mcp-proxy-design · e7-real-upstream-plan · consensus plan
-```
-
 | # | Component | Plane | Role |
 |---|---|---|---|
 | 1 | **DriftWatch Operator** | Control | Kopf operator; watches `AgentDriftPolicy`, reconciles it into a baseline learner + detector config + enforcement action; writes `status` (`baselineReady`, `observedTaskTypes`). |
