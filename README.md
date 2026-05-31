@@ -83,7 +83,10 @@ a shared store (`DRIFTWATCH_DATA_DIR`), unit-tested in `tests/test_interceptor_a
 (incl. a read-only-mount case, TC-F-21 unit) and proven end-to-end on k3d by
 `examples/k3d-cluster-demo/fr10-e2e.sh`: the operator writes a ready baseline to the PVC, a
 separate interceptor pod mounts it read-only, and on the live `/v1/tool-call` a
-within-baseline call is forwarded (200) while a drift is blocked (403). **Still roadmap:**
+within-baseline call is forwarded (200) while a drift is blocked (403). The sidecar opens
+the shared store read-only (`SqliteBackend(read_only=True)`) as a hardening measure; note
+the e2e above was run against the published `:0.1.0a0` image, which predates that change —
+rebuild/republish to bring the public image in sync with the repo. **Still roadmap:**
 Helm-managed sidecar injection (mutating webhook) — until then the supported wiring is the
 manual fragment in `deploy/sidecar-manual.yaml`.
 

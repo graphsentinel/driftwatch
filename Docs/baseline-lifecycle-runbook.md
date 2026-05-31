@@ -131,9 +131,13 @@ policy knobs via env (`DRIFTWATCH_ACTION`/`THRESHOLD`/`FAILURE_POLICY`/`FEATURES
 implemented, unit-tested (incl. a read-only-mount case), and **verified in-cluster** by
 `examples/k3d-cluster-demo/fr10-e2e.sh` (TC-F-21): operator writes a ready baseline to the
 PVC → a separate interceptor pod mounts it read-only → live `/v1/tool-call` forwards a
-within-baseline call (200) and blocks a drift (403). The remaining roadmap item is
-Helm-managed sidecar injection; until then use the manual wiring in
-`deploy/sidecar-manual.yaml`.
+within-baseline call (200) and blocks a drift (403). (That e2e ran on the published
+`:0.1.0a0` image; the sidecar now also opens the store with `SqliteBackend(read_only=True)`
+as a hardening measure — rebuild/republish to sync the public image with the repo. The
+read-only open is defensive, not load-bearing: the e2e passed without it because an
+existing db dir is a no-op for `mkdir(exist_ok=True)` and `CREATE TABLE IF NOT EXISTS`.)
+The remaining roadmap item is Helm-managed sidecar injection; until then use the manual
+wiring in `deploy/sidecar-manual.yaml`.
 
 ```bash
 # run the FR-10 in-cluster e2e (needs persistence enabled + KUBECONFIG)
