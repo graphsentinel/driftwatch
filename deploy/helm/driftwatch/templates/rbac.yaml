@@ -3,6 +3,60 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: driftwatch-operator
+{{- if .Values.rbac.namespaced }}
+---
+# Namespace-scoped least-privilege (R10b). Policies + events live in this namespace;
+# CRD definitions are cluster-scoped so they still need a small read-only ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: driftwatch-operator
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["driftwatch.graphsentinel.org"]
+    resources: ["agentdriftpolicies", "agentdriftpolicies/status"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: driftwatch-operator
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: driftwatch-operator
+subjects:
+  - kind: ServiceAccount
+    name: driftwatch-operator
+    namespace: {{ .Release.Namespace }}
+---
+# CRD definitions are cluster-scoped — read-only access only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: driftwatch-operator-crd-read
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: driftwatch-operator-crd-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: driftwatch-operator-crd-read
+subjects:
+  - kind: ServiceAccount
+    name: driftwatch-operator
+    namespace: {{ .Release.Namespace }}
+{{- else }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -31,4 +85,5 @@ subjects:
   - kind: ServiceAccount
     name: driftwatch-operator
     namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

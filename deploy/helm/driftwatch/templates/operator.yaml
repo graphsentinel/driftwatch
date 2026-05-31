@@ -34,4 +34,9 @@ spec:
           resources: {{- toYaml .Values.operator.resources | nindent 12 }}
       volumes:
         - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: driftwatch-baseline
+          {{- else }}
           emptyDir: {}                # baselines are rebuilt from runs; persistence is per-pod
+          {{- end }}

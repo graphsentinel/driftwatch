@@ -40,8 +40,20 @@ otel:
 crd:
   install: true
 
+# Durable baseline persistence (NFR-10). Off by default (demo uses emptyDir, per-pod);
+# enable for production so the baseline survives operator restarts.
+persistence:
+  enabled: false
+  size: 1Gi
+  storageClassName: ""          # "" = cluster default StorageClass
+  accessModes: ["ReadWriteOnce"]
+
 rbac:
   create: true
+  # CRD watch is cluster-scoped by nature, so the default is a ClusterRole. For
+  # least-privilege prod where policies live in one namespace, set namespaced=true to
+  # emit a namespace-scoped Role/RoleBinding instead (CRD read still needs cluster read).
+  namespaced: false
 
 webhook:
   # Sidecar-injector mutating webhook. Default OFF in v1alpha1: the injector binary
