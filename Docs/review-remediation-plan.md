@@ -204,11 +204,16 @@ template. Provenance mandatory.
 
 ---
 
-## CFP submit-blockers (before submission)
-1. **R2** — path A/B honesty in Abstract/Benefits (no "running real-Kagent deployment").
-2. **R5** — retry_storm aligned (rename to tool_escalation, or add real rate feature).
-3. **Inverse-scaling** — keep it as "to be filled from real captured data", NOT a result.
-   Current eval β₁=+0.0000 (seed has no signal) — must not be a headline number.
+## CFP submit-blockers (before submission) — DONE in the CFP
+1. **R2** — ✅ Abstract softened: "Kagent-/Goose-style workloads", no live real-Kagent
+   deployment claim; path A/B split already explicit (14 mentions).
+2. **R5** — ✅ "rate-shaped storms" claim removed; demo-5 reframed as tool escalation
+   (out-of-baseline DeleteNode, not call-rate); rate feature noted as roadmap.
+3. **Inverse-scaling** — ✅ DATA-READY slot states the seed has no capability signal
+   (β₁≈0) and must NOT be a headline number; abstract asks the question, doesn't assert.
+
+Also folded into the CFP this pass: FR-10, NFR-7..10 (requirements table); TC-F-20..28
+(test catalog); RE1/RE2 (epic table + Should/Could backlog).
 
 ---
 
