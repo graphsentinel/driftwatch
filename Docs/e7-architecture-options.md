@@ -23,7 +23,7 @@ Kagent agent pod ──MCP──> DriftWatch MCP proxy ──MCP──> real MCP
 
 DriftWatch registers as Kagent's `RemoteMCPServer` and acts as an MCP proxy/mediator — but
 it does **not** hand-roll the protocol. It builds on an MCP library (FastMCP): proxy support
-(e.g. `as_proxy(...)`, exact API pinned at implementation) for the server↔upstream proxy,
+(`fastmcp.server.create_proxy(...)` in fastmcp 3.3.1) for the server↔upstream proxy,
 and an `on_call_tool`-style middleware hook to score each call before forwarding. See
 `e7-mcp-proxy-design.md` for the detailed plan and package/version caveats.
 
@@ -143,7 +143,7 @@ capability.
 2. **Reference path (A) core** — the pure name/args → engine-dict mapping (`to_engine_call`),
    pure and unit-tested, no cluster. Useful to *both* options (B can reuse it if agentgateway
    forwards the raw body).
-3. **A proxy shell + chain keying** — the MCP-library proxy (FastMCP `as_proxy`) plus the
+3. **A proxy shell + chain keying** — the MCP-library proxy (`fastmcp.server.create_proxy`) plus the
    `on_call_tool` enforcement middleware and per-session chain state; unit-tested with a fake
    upstream MCP server. (The library owns transport — we do not write JSON-RPC.)
 4. **Live e2e** — A against a real Kagent + ToolServer; and, if the step-1 spike passed,

@@ -23,8 +23,9 @@ and the separate ergonomic **`fastmcp`** package (PyPI `fastmcp`), which is wher
 middleware ergonomics live; `fastmcp` depends on `mcp`. We target **`fastmcp`** via the opt-in
 `mcp` extra (`pip install -e '.[mcp]'`). API names below are **pinned to the installed
 fastmcp 3.3.1**, not indicative:
-- proxy: `FastMCP.as_proxy(backend) -> FastMCP` (note: in 3.3.1 it is `as_proxy`, **not**
-  `create_proxy`; `backend` accepts the upstream URL / `Client` / transport),
+- proxy: `fastmcp.server.create_proxy(backend) -> FastMCP` — the non-deprecated form in
+  3.3.1 (`FastMCP.as_proxy` still exists but emits a deprecation warning pointing here);
+  `backend` accepts the upstream URL / `Client` / transport,
 - middleware: `from fastmcp.server.middleware import Middleware`, hook
   `async def on_call_tool(self, context, call_next) -> ToolResult`,
 - call fields: `context.message.name`, `context.message.arguments`,
@@ -37,7 +38,7 @@ Re-verify these if the pinned version changes.
 What the library gives us:
 
 - **Streamable HTTP** transport (the recommended prod transport; SSE is deprecated).
-- A **proxy/mediator** primitive — `FastMCP.as_proxy(backend)` (fastmcp 3.3.1) — so DriftWatch
+- A **proxy/mediator** primitive — `fastmcp.server.create_proxy(backend)` (fastmcp 3.3.1) — so DriftWatch
   can be an MCP **server** to Kagent and an MCP **client** to the upstream ToolServer at once,
   with `tools/list`, session lifecycle, streaming, and error mapping handled by the library.
 - **Middleware** with an `on_call_tool(self, context, call_next)`-style hook — the seam to
@@ -72,7 +73,7 @@ hold **per-session decision-chain state** itself — the chain-aware thesis, nat
 ### T-E7.1 — MCP proxy/mediator via the library (no hand-rolled JSON-RPC)
 
 A proxy app built with the MCP library: an MCP server (facing Kagent) backed by an MCP
-client to the upstream ToolServer — use `FastMCP.as_proxy(backend)` (fastmcp 3.3.1). The upstream URL comes from config
+client to the upstream ToolServer — use `fastmcp.server.create_proxy(backend)` (fastmcp 3.3.1). The upstream URL comes from config
 (`DRIFTWATCH_UPSTREAM_MCP`). `tools/list` and non-tool methods are handled by the proxy
 automatically (passthrough) — DriftWatch only governs `tools/call`.
 
