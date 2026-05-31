@@ -12,6 +12,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[all]"          # operator+interceptor+graph+dev — exercise the real runtime
       - run: ruff check src tests
-      - run: pytest --cov=driftwatch
+      # Runtime deps are installed, so no test may skip for a missing import.
+      # -ra shows skip reasons; the guard step below fails the build on any skip.
+      - run: pytest --cov=driftwatch -ra | tee /tmp/pytest.out
+      - name: No unexpected skips (NFR-7)
+        run: |
+          if grep -qE "[1-9][0-9]* skipped" /tmp/pytest.out; then
+            echo "::error::tests were skipped with .[all] installed — runtime surface not exercised"
+            grep -E "skipped|SKIPPED" /tmp/pytest.out || true
+            exit 1
+          fi
