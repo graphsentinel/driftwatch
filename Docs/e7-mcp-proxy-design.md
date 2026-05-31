@@ -17,21 +17,29 @@ and upstream forwarding by hand (`interceptor/mcp.py` + `mcp_proxy.py`). **That 
 the fragile part (the protocol) is exactly what a maintained library should own. DriftWatch
 is Python, so build on an MCP library rather than the wire.
 
-**Package choice (pin at implementation).** Two ecosystems exist and must not be conflated:
-the **official `mcp` SDK** (PyPI `mcp`, the `modelcontextprotocol/python-sdk`) and the
-separate ergonomic **`fastmcp`** package (PyPI `fastmcp`, Jeremiah Lowin), which is where the
-proxy + middleware ergonomics below live. The plan targets **`fastmcp`** for the
-proxy/middleware seam; the exact package split, import paths, and minimum versions
-(`create_proxy`, the middleware base, the session/context API) MUST be verified against the
-installed version before coding — treat every API name here as indicative, not pinned.
+**Package choice (verified against fastmcp 3.3.1 / mcp 1.27.2).** Two ecosystems exist and
+must not be conflated: the **official `mcp` SDK** (PyPI `mcp`, `modelcontextprotocol/python-sdk`)
+and the separate ergonomic **`fastmcp`** package (PyPI `fastmcp`), which is where the proxy +
+middleware ergonomics live; `fastmcp` depends on `mcp`. We target **`fastmcp`** via the opt-in
+`mcp` extra (`pip install -e '.[mcp]'`). API names below are **pinned to the installed
+fastmcp 3.3.1**, not indicative:
+- proxy: `FastMCP.as_proxy(backend) -> FastMCP` (note: in 3.3.1 it is `as_proxy`, **not**
+  `create_proxy`; `backend` accepts the upstream URL / `Client` / transport),
+- middleware: `from fastmcp.server.middleware import Middleware`, hook
+  `async def on_call_tool(self, context, call_next) -> ToolResult`,
+- call fields: `context.message.name`, `context.message.arguments`,
+- session key: `context.fastmcp_context.session_id`,
+- block: `from fastmcp.exceptions import ToolError` (note: `ToolError` is in `fastmcp`, not in
+  the base `mcp` package),
+- result type: `fastmcp.tools.tool.ToolResult`.
+Re-verify these if the pinned version changes.
 
 What the library gives us:
 
 - **Streamable HTTP** transport (the recommended prod transport; SSE is deprecated).
-- A **proxy/mediator** primitive — e.g. `create_proxy(...)` (exact API pinned during
-  implementation) — so DriftWatch can be an MCP **server** to Kagent and an MCP **client** to
-  the upstream ToolServer at once, with `tools/list`, session lifecycle, streaming, and error
-  mapping handled by the library.
+- A **proxy/mediator** primitive — `FastMCP.as_proxy(backend)` (fastmcp 3.3.1) — so DriftWatch
+  can be an MCP **server** to Kagent and an MCP **client** to the upstream ToolServer at once,
+  with `tools/list`, session lifecycle, streaming, and error mapping handled by the library.
 - **Middleware** with an `on_call_tool(self, context, call_next)`-style hook — the seam to
   insert DriftWatch scoring before a call is forwarded upstream.
 
@@ -64,8 +72,7 @@ hold **per-session decision-chain state** itself — the chain-aware thesis, nat
 ### T-E7.1 — MCP proxy/mediator via the library (no hand-rolled JSON-RPC)
 
 A proxy app built with the MCP library: an MCP server (facing Kagent) backed by an MCP
-client to the upstream ToolServer — use FastMCP proxy support, e.g. `create_proxy(...)`
-(exact API pinned during implementation). The upstream URL comes from config
+client to the upstream ToolServer — use `FastMCP.as_proxy(backend)` (fastmcp 3.3.1). The upstream URL comes from config
 (`DRIFTWATCH_UPSTREAM_MCP`). `tools/list` and non-tool methods are handled by the proxy
 automatically (passthrough) — DriftWatch only governs `tools/call`.
 
