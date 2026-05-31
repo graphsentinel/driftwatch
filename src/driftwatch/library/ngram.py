@@ -1,7 +1,9 @@
 """Sequence n-gram model over the tool chain.
 
-Catches *order* drift (sequence inversion) and rate-shaped storms — failures that are
-invisible per-call. A transition never seen in the baseline scores as drift.
+Catches *order* drift (sequence inversion) — a transition never seen in the baseline
+scores as drift; failures invisible per-call. (A frequency/rate feature for repeated-call
+storms is roadmap — the counts tracked here would back it, but v1alpha1 only flags
+novel transitions, not call-rate.)
 """
 from __future__ import annotations
 
