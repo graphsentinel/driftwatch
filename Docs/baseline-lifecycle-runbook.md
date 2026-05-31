@@ -127,10 +127,18 @@ way to *show* why durability matters.
 
 The same store is the seam for the FR-10 operator→sidecar handoff: the operator writes the
 reconciled baseline to `/data`, and a sidecar mounts the same store read-only plus the
-policy knobs via env (`DRIFTWATCH_ACTION`/`THRESHOLD`/`FAILURE_POLICY`/`FEATURES`). The
-library/unit path for this is implemented and tested; the in-cluster shared-store e2e
-(TC-F-21, a live agent sidecar reading the operator's PVC) is the remaining validation
-step — see `deploy/sidecar-manual.yaml` for the current manual wiring.
+policy knobs via env (`DRIFTWATCH_ACTION`/`THRESHOLD`/`FAILURE_POLICY`/`FEATURES`). This is
+implemented, unit-tested (incl. a read-only-mount case), and **verified in-cluster** by
+`examples/k3d-cluster-demo/fr10-e2e.sh` (TC-F-21): operator writes a ready baseline to the
+PVC → a separate interceptor pod mounts it read-only → live `/v1/tool-call` forwards a
+within-baseline call (200) and blocks a drift (403). The remaining roadmap item is
+Helm-managed sidecar injection; until then use the manual wiring in
+`deploy/sidecar-manual.yaml`.
+
+```bash
+# run the FR-10 in-cluster e2e (needs persistence enabled + KUBECONFIG)
+examples/k3d-cluster-demo/fr10-e2e.sh
+```
 
 ---
 

@@ -77,12 +77,15 @@ durable baseline persistence via PVC and an optional namespace-scoped RBAC mode 
 and the consensus baseline producer uses multi-granularity quorum, not a bare majority
 tool-set (R9, offline seeding — live model-panel polling stays roadmap).
 
-**FR-10 handoff (operator → live sidecar):** the library/unit path is implemented — the
+**FR-10 handoff (operator → live sidecar):** implemented and **verified in-cluster**. The
 sidecar reads the operator-reconciled policy from env and loads the baseline snapshot from
-a shared store (`DRIFTWATCH_DATA_DIR`), unit-tested in `tests/test_interceptor_adapters.py`.
-**Still pending:** the in-cluster shared-store e2e (operator PVC ↔ a real agent sidecar
-reading the same store) and Helm-managed sidecar injection — until then the supported wiring
-is the manual fragment in `deploy/sidecar-manual.yaml`.
+a shared store (`DRIFTWATCH_DATA_DIR`), unit-tested in `tests/test_interceptor_adapters.py`
+(incl. a read-only-mount case, TC-F-21 unit) and proven end-to-end on k3d by
+`examples/k3d-cluster-demo/fr10-e2e.sh`: the operator writes a ready baseline to the PVC, a
+separate interceptor pod mounts it read-only, and on the live `/v1/tool-call` a
+within-baseline call is forwarded (200) while a drift is blocked (403). **Still roadmap:**
+Helm-managed sidecar injection (mutating webhook) — until then the supported wiring is the
+manual fragment in `deploy/sidecar-manual.yaml`.
 
 **Roadmap:** governing a real Helm-installed Kagent at the MCP hop (path B / E7), live
 multi-provider model-panel polling for consensus seeding, and a Go/controller-runtime
