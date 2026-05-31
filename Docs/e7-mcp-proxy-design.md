@@ -1,5 +1,10 @@
 # E7 — MCP-proxy enforcement design (path B, real Kagent)
 
+> **This is Option A.** See `e7-architecture-options.md` for the A-vs-B comparison; the
+> current recommendation is **Option B** (agentgateway in front, DriftWatch as external
+> authorization — far less new code, mature transport). This doc remains the detailed plan
+> for the self-contained-proxy fallback (Option A).
+
 **Status: design only. Implementation is sequenced LAST** (after FR-9 `runner.py` and the
 webhook sidecar injector). This doc is the plan so the implementation, when it lands, is
 mechanical and grounded in what already exists.
