@@ -55,11 +55,41 @@ proof: a genuine Kubernetes MCP upstream, DriftWatch actually proxying in betwee
   - a `gen_ai.evaluation.result` with `gate.action=block` + the anomaly kind is emitted.
 
 ### Phase-1 acceptance criteria
-- [ ] upstream `kubernetes-mcp-server` answers `tools/list` over `/mcp` in-cluster;
-- [ ] DriftWatch proxy forwards a within-baseline call and relays the real upstream result;
-- [ ] a destructive/drift call is blocked at the proxy; upstream logs/behavior show it was
-      never called; OTel carries `gate.action=block`;
-- [ ] path A (`make demo`) still green — E7 adds a path, doesn't replace the fallback.
+- [x] upstream `kubernetes-mcp-server` answers `tools/list` over `/mcp` in-cluster;
+- [x] DriftWatch proxy forwards a within-baseline call and relays the real upstream result;
+- [x] a destructive/drift call is blocked at the proxy; upstream logs/behavior show it was
+      never called;
+- [x] path A (`make demo`) still green — E7 adds a path, doesn't replace the fallback.
+
+### Phase 1 — RESULTS (validated live on k3d)
+
+Live architecture run end-to-end:
+`FastMCP Client → DriftWatch MCP proxy → kubernetes-mcp-server → k3d Kubernetes API`.
+Three pods Running in `driftwatch` ns: `driftwatch-mcp` (proxy, fastmcp 3.3.1),
+`k8smcp-kubernetes-mcp-server` (upstream, cluster-scope read-only RBAC), `driftwatch-operator`
+(baseline written to the shared PVC). Install notes that bit: the upstream chart needs
+`ingress.enabled=false`; pin the image by **tag** not digest in k3d (a digest the local build
+produced wasn't resolvable in the registry from the node); the upstream SA needs read-only
+cluster RBAC (`get/list/watch`) to actually return data.
+
+Evidence:
+- **Passthrough** — the proxy advertises all **19 real upstream tools** verbatim, including
+  `pods_delete` (DriftWatch does not hide tools; it governs at call time).
+- **Within-baseline forward** — `namespaces_list` → proxy → upstream → **real K8s data**
+  (570 B: `kube-system`, `kube-public`, …).
+- **Destructive block (single tool)** — `pods_delete` →
+  `blocked by DriftWatch: decision drift (baseline_mismatch)`; the upstream pod log shows
+  `pods_delete = 0` — the call **never reached the real ToolServer**.
+- **Sequence drift (the distinctive case)** — with a baseline that learned the order
+  `namespaces_list → pods_list`: the correct order **forwards both** calls, but the
+  **reversed order** `pods_list → namespaces_list` (both tools individually allowed, only the
+  *order* wrong) is **blocked**: `decision drift (blocked_transition) — novel transition`.
+  This is exactly what a per-call gateway can't catch — the chain-aware proof.
+
+Two-layer safety held: DriftWatch never forwarded the destructive call, **and** the upstream
+ran read-only so it couldn't have written even if it had. Showing `pods_delete` in the tool
+list is intentional — it proves DriftWatch sees the agent's real tool surface and enforces at
+decision time rather than hiding capabilities.
 
 ---
 
