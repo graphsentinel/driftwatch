@@ -55,6 +55,26 @@ def test_reconcile_writes_status():  # TC-F-02
     assert rec.status() == {"baselineReady": True, "observedTaskTypes": 1}
 
 
+def test_baseline_poisoning_guard():  # TC-F-25 (NFR-8)
+    rec = Reconciler(validate(GOOD_SPEC), persistent=False)
+    _fold(rec)  # warm a ready baseline from trusted successfulRuns
+
+    # 1) a drift-suspect chain must NOT auto-fold, even from a trusted source
+    drift = DecisionChain(task_type="investigate_latency")
+    drift.add(ToolCall(tool="DeleteNamespace", scope="ns/a", category="k8s", risk=4))
+    assert rec.observe(drift, source="successfulRuns") is False
+    b = rec.store.get("investigate_latency")
+    assert "DeleteNamespace" not in b.expected_tools   # baseline not poisoned
+
+    # 2) an untrusted source never auto-folds, even a benign chain
+    benign = DecisionChain(task_type="investigate_latency")
+    benign.add(ToolCall(tool="QueryMetrics", scope="ns/a", category="observability"))
+    assert rec.observe(benign, source="liveTraffic") is False
+
+    # 3) a within-baseline chain from a trusted source DOES fold
+    assert rec.observe(benign, source="successfulRuns") is True
+
+
 def test_otel_schema_conformance():  # TC-F-08
     store = BaselineStore(window=10)
     for _ in range(3):

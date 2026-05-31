@@ -7,7 +7,13 @@ from __future__ import annotations
 
 from ..db import MemoryBackend, SqliteBackend
 from ..library.baseline import BaselineStore
+from ..library.decision import score_chain
 from .policy import Policy
+
+# Sources whose chains are trusted enough to auto-fold into the baseline (NFR-8).
+# Real successful runs / approved traces / dry-runs widen "normal"; anything else
+# (e.g. live observed traffic that may itself be drifting) must not auto-fold.
+TRUSTED_SOURCES = {"approvedTraces", "successfulRuns", "dryRun"}
 
 
 class Reconciler:
@@ -29,10 +35,28 @@ class Reconciler:
                 self.store.fold(chain)
         self.backend.save(self.store)
 
-    def observe(self, chain) -> None:
-        """Fold one real successful run into the baseline."""
+    def observe(self, chain, *, source: str = "successfulRuns") -> bool:
+        """Fold one observed chain into the baseline — but only if it's safe to (NFR-8).
+
+        Baseline poisoning guard: an untrusted source, or a chain that the CURRENT
+        baseline would score as drift, must NOT redefine "normal". Returns True if the
+        chain was folded, False if it was refused.
+
+        - Untrusted source → never auto-fold.
+        - Cold start (baseline not ready) → fold to bootstrap (nothing to score against).
+        - Ready baseline → fold only if the chain is within baseline (not drift).
+        """
+        if source not in TRUSTED_SOURCES:
+            return False
+        baseline = self.store.get(chain.task_type)
+        if baseline.ready:
+            d = score_chain(chain, baseline, threshold=self.policy.threshold,
+                            action=self.policy.action, features=set(self.policy.features))
+            if d.is_drift:
+                return False  # drift-suspect chain never auto-folds
         self.store.fold(chain)
         self.backend.save(self.store)
+        return True
 
     def status(self) -> dict:
         """The status subresource the operator writes (never the user)."""
