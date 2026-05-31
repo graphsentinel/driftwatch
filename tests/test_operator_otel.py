@@ -94,5 +94,32 @@ def test_operator_run_invokes_kopf_run(monkeypatch):
     assert called.get("k", {}).get("standalone") is True
 
 
+def test_feature_mask_enforced():  # TC-F-23 (FR-2 — detection.features actually applied)
+    store = BaselineStore(window=10)
+    for _ in range(3):
+        c = DecisionChain(task_type="restart_pod")
+        c.add(ToolCall(tool="DescribePod", scope="ns/team-a", category="k8s"))
+        store.fold(c)
+    b = store.get("restart_pod")
+
+    # a known tool but a never-seen scope -> a scope-only deviation
+    scope_drift = DecisionChain(task_type="restart_pod")
+    scope_drift.add(ToolCall(tool="DescribePod", scope="ns/team-b", category="k8s"))
+
+    # default (all features) catches it as scope_creep
+    d_all = score_chain(scope_drift, b, action="block")
+    assert d_all.is_drift and d_all.anomaly_kind == "scope_creep"
+
+    # features=[tool] disables the scope feature -> no drift
+    d_tool = score_chain(scope_drift, b, action="block", features={"tool"})
+    assert not d_tool.is_drift and d_tool.anomaly_kind is None
+
+    # the tool feature still works under the same mask
+    tool_drift = DecisionChain(task_type="restart_pod")
+    tool_drift.add(ToolCall(tool="DeleteNamespace", scope="ns/team-a", category="k8s"))
+    d2 = score_chain(tool_drift, b, action="block", features={"tool"})
+    assert d2.is_drift and d2.anomaly_kind == "baseline_mismatch"
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))

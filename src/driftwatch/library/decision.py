@@ -20,6 +20,9 @@ ANOMALY_BLOCKED_TRANSITION = "blocked_transition"
 ANOMALY_ARG_SCHEMA_NOVEL = "arg_schema_novel"
 ANOMALY_RISK_ESCALATION = "risk_escalation"
 
+# the four detection features a policy may enable via detection.features (FR-2)
+ALL_FEATURES = ("tool", "scope", "sequence", "argSchemaHash")
+
 
 @dataclass
 class Decision:
@@ -57,14 +60,20 @@ def score_chain(
     *,
     threshold: float = 3.0,
     action: str = "block",
+    features: "set[str] | None" = None,
 ) -> Decision:
-    """Score a chain; return the Decision for its single worst (most-drifted) call."""
+    """Score a chain; return the Decision for its single worst (most-drifted) call.
+
+    `features` is the policy's `detection.features` — only those contribute to drift
+    (FR-2). None means all four (backward-compatible default).
+    """
+    active = set(features) if features else set(ALL_FEATURES)
     worst: Decision | None = None
     tools = chain.tools
     novel_transitions = baseline.sequence.novel_transitions(tools)
 
     for call in chain.calls:
-        d = _score_call(call, baseline, novel_transitions, threshold, action)
+        d = _score_call(call, baseline, novel_transitions, threshold, action, active)
         if worst is None or d.score_value > worst.score_value:
             worst = d
 
@@ -84,6 +93,7 @@ def _score_call(
     novel_transitions: list,
     threshold: float,
     action: str,
+    features: set[str],
 ) -> Decision:
     fp = fingerprint(call)
     feature: str | None = None
@@ -92,13 +102,14 @@ def _score_call(
     reason = "within baseline"
 
     # feature 1: tool not in the expected set for this task
-    if baseline.expected_tools and fp.tool not in baseline.expected_tools:
+    if "tool" in features and baseline.expected_tools and fp.tool not in baseline.expected_tools:
         feature, kind = "tool", ANOMALY_BASELINE_MISMATCH
         raw_z = max(raw_z, threshold + 1.0)
         reason = f"tool {fp.tool!r} not in baseline"
 
     # feature 2: scope never seen for this task
-    if feature is None and fp.scope and baseline.seen_scopes and fp.scope not in baseline.seen_scopes:
+    if (feature is None and "scope" in features
+            and fp.scope and baseline.seen_scopes and fp.scope not in baseline.seen_scopes):
         feature, kind = "scope", ANOMALY_SCOPE_CREEP
         raw_z = max(raw_z, threshold + 1.0)
         reason = f"scope {fp.scope!r} never seen for this task"
@@ -106,20 +117,22 @@ def _score_call(
     # feature 3: sequence transition the baseline never observed.
     # Attribute the drift to the DESTINATION tool (last token of the gram) — the call
     # that *arrived* out of order — not the (innocent) source tool before it.
-    if feature is None and novel_transitions and any(g[-1] == call.tool for g in novel_transitions):
+    if (feature is None and "sequence" in features
+            and novel_transitions and any(g[-1] == call.tool for g in novel_transitions)):
         feature, kind = "sequence", ANOMALY_BLOCKED_TRANSITION
         raw_z = max(raw_z, threshold + 1.0)
         reason = f"novel transition into {call.tool!r}"
 
     # feature 4: structurally novel arguments
     seen = baseline.seen_arg_schemas.get(fp.tool, set())
-    if feature is None and seen and fp.arg_schema_hash not in seen:
+    if feature is None and "argSchemaHash" in features and seen and fp.arg_schema_hash not in seen:
         feature, kind = "argSchemaHash", ANOMALY_ARG_SCHEMA_NOVEL
         raw_z = max(raw_z, threshold + 0.5)
         reason = f"novel argument schema for {fp.tool!r}"
 
-    # numeric escalation: unusually high risk vs baseline (z-score)
-    if baseline.max_risk.ready:
+    # numeric escalation: unusually high risk vs baseline (z-score). Gated by the `tool`
+    # feature, since a risk spike is attributed to the tool dimension.
+    if "tool" in features and baseline.max_risk.ready:
         z = baseline.max_risk.raw_z(fp.risk)
         if z > raw_z:
             raw_z = z

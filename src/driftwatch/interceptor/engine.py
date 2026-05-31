@@ -37,6 +37,7 @@ class Interceptor:
         threshold: float = 3.0,
         action: str = "block",
         failure_policy: str = "failClosed",
+        features: "set[str] | None" = None,
         emitter: Emitter | None = None,
     ):
         self.store = store
@@ -44,6 +45,7 @@ class Interceptor:
         self.threshold = threshold
         self.action = action
         self.failure_policy = failure_policy
+        self.features = features            # None -> all four (FR-2 detection.features)
         self.emitter = emitter or Emitter()
 
     def handle(self, raw_call: dict, baseline_id: str = "baseline.v1") -> Verdict:
@@ -56,7 +58,8 @@ class Interceptor:
             if not baseline.ready:
                 return self._cold_start()  # TC-F-04 at runtime
 
-            decision = score_chain(chain, baseline, threshold=self.threshold, action=self.action)
+            decision = score_chain(chain, baseline, threshold=self.threshold,
+                                   action=self.action, features=self.features)
             signals = self.emitter.emit(chain, decision, baseline_id)
 
             if not decision.is_drift or decision.gate_action == "log":
