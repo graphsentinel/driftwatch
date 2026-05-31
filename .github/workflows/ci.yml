@@ -24,3 +24,21 @@ jobs:
             grep -E "skipped|SKIPPED" /tmp/pytest.out || true
             exit 1
           fi
+
+  chart:
+    # TC-F-27: the Helm chart must lint and render in every mode. Catches a partial
+    # template/values change (e.g. a PVC template referencing a values key that isn't
+    # there) before it ships.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint
+        run: helm lint deploy/helm/driftwatch
+      - name: render — default (no PVC, cluster RBAC, emptyDir)
+        run: helm template dw deploy/helm/driftwatch -f deploy/helm/driftwatch/values-k3d.yaml
+      - name: render — persistence + namespace-scoped RBAC (NFR-10 / R10b)
+        run: |
+          helm template dw deploy/helm/driftwatch \
+            --set persistence.enabled=true \
+            --set rbac.namespaced=true

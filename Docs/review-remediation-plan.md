@@ -225,7 +225,8 @@ Also folded into the CFP this pass: FR-10, NFR-7..10 (requirements table); TC-F-
 4. **R4** (feature mask) — contained `score_chain` change. *(FR-2)*
 5. **R6** (poisoning guard) — baseline source-trust. *(NFR-8)*
 6. **R1** (operator→sidecar handoff + e2e) — the headline gap. *(RE1, biggest)*
-7. **R8** (PVC), **R9** (consensus granularity), **R10b** (RBAC) — prod depth.
+7. **R8** (PVC) ✅, **R10b** (namespace-scoped RBAC) ✅ — prod depth shipped; **R9**
+   (consensus-producer code, FR-9) ⬜ still uncoded (granularity wording already amended).
 
 Each step: code → test (no skips) → commit. R1 is the largest and lands after the cheap
 wins so it's exercised by a CI that actually runs the runtime.
