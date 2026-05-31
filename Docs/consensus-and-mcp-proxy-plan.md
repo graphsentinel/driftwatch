@@ -31,9 +31,14 @@ single-model proposals are dropped, then the surviving consensus chain is folded
 existing `Reconciler.seed_from_models()`.
 
 **Chosen design (your decisions).**
-- Consensus rule: **majority tool-set** — keep tools proposed by ≥ ⌈N/2⌉ distinct models
-  (same quorum for scopes and sequence transitions). Not capability-weighted — majority,
-  so it does NOT contradict the inverse-scaling finding (bigger ≠ safer).
+- Consensus rule: **multi-granularity majority quorum** — a proposal is kept only if
+  ≥ ⌈N/2⌉ distinct models produced it, applied at EACH level: tool, scope, ordered
+  transition, and (where N allows) the full-chain template. Majority *tool-set alone* is
+  too coarse — each tool can be individually majority while the combined chain/order was
+  proposed by no model; the transition + chain-template quorum closes that gap (see R9 /
+  TC-F-28 in `review-remediation-plan.md`). Provenance records which level each surviving
+  element passed. Not capability-weighted — majority, so it does NOT contradict the
+  inverse-scaling finding (bigger ≠ safer).
 - Execution: **offline CLI**, writes the baseline to the sqlite/JSON store the operator
   loads (`DRIFTWATCH_DATA_DIR`). The operator pod never calls an LLM — stage-safe, no
   network dependency at reconcile time.

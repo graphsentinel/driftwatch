@@ -64,7 +64,13 @@ Publishing the image + chart to GHCR (maintainer) → **[Docs/publishing-ghcr.md
 
 ## Status
 
-`v1alpha1` — Python/Kopf reference implementation. A Go/controller-runtime rewrite
-is on the roadmap once the CRD contract stabilizes.
+`v1alpha1` — Python/Kopf reference implementation, **validated end-to-end on k3d via
+path A** (deterministic stand-in workloads + in-process demo): operator reconciles the
+policy and writes status, telemetry lands in Jaeger/Prometheus/Grafana. **Planned next:**
+pushing the reconciled baseline into the live sidecar (FR-10 / RE1 handoff), governing a
+real Helm-installed Kagent at the MCP hop (path B / E7), and production hardening
+(CI runtime coverage, securityContext, persistence) — see
+[Docs/review-remediation-plan.md](Docs/review-remediation-plan.md). A Go/controller-runtime
+rewrite is on the roadmap once the CRD contract stabilizes.
 
 Apache-2.0.
