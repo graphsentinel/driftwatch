@@ -66,11 +66,26 @@ Publishing the image + chart to GHCR (maintainer) → **[Docs/publishing-ghcr.md
 
 `v1alpha1` — Python/Kopf reference implementation, **validated end-to-end on k3d via
 path A** (deterministic stand-in workloads + in-process demo): operator reconciles the
-policy and writes status, telemetry lands in Jaeger/Prometheus/Grafana. **Planned next:**
-pushing the reconciled baseline into the live sidecar (FR-10 / RE1 handoff), governing a
-real Helm-installed Kagent at the MCP hop (path B / E7), and production hardening
-(CI runtime coverage, securityContext, persistence) — see
-[Docs/review-remediation-plan.md](Docs/review-remediation-plan.md). A Go/controller-runtime
-rewrite is on the roadmap once the CRD contract stabilizes.
+policy and writes status, telemetry lands in Jaeger/Prometheus/Grafana.
+
+**Implemented since the consultant review** (see
+[Docs/review-remediation-plan.md](Docs/review-remediation-plan.md)): CI exercises the
+operator+interceptor runtime and fails on unexpected skips (R3); `detection.features` is
+enforced as a real feature mask (R4); baseline ingestion has a source-trust poisoning
+guard (R6); the Helm workloads ship a hardened securityContext + read-only rootfs (R7);
+durable baseline persistence via PVC and an optional namespace-scoped RBAC mode (R8/R10b);
+and the consensus baseline producer uses multi-granularity quorum, not a bare majority
+tool-set (R9, offline seeding — live model-panel polling stays roadmap).
+
+**FR-10 handoff (operator → live sidecar):** the library/unit path is implemented — the
+sidecar reads the operator-reconciled policy from env and loads the baseline snapshot from
+a shared store (`DRIFTWATCH_DATA_DIR`), unit-tested in `tests/test_interceptor_adapters.py`.
+**Still pending:** the in-cluster shared-store e2e (operator PVC ↔ a real agent sidecar
+reading the same store) and Helm-managed sidecar injection — until then the supported wiring
+is the manual fragment in `deploy/sidecar-manual.yaml`.
+
+**Roadmap:** governing a real Helm-installed Kagent at the MCP hop (path B / E7), live
+multi-provider model-panel polling for consensus seeding, and a Go/controller-runtime
+rewrite once the CRD contract stabilizes.
 
 Apache-2.0.
