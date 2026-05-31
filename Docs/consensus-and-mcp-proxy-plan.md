@@ -7,7 +7,7 @@ this doc is the implementation plan for the parts that are specified but not yet
   `sources: [..., {models: [qwen, gemma]}]` ("2+ models vote on the expected chain to seed
   a baseline"), FR-9 defines it, and **TC-F-15** ("Model seed + handover") is its test.
   What's missing is only the *producer* that turns those models' votes into the seed.
-- **MCP-proxy enforcement = E7** (CFP Epic E7, TC-F-13/14): score a real, Helm-installed
+- **MCP-proxy enforcement = E7** (CFP Epic E7, TC-F-16/17): score a real, Helm-installed
   Kagent's tool calls against that baseline at the MCP hop.
 
 Together they complete the "learn normal from a model panel, then police real Kagent
