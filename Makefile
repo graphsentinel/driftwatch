@@ -12,8 +12,8 @@ lint:
 	ruff check src tests
 	mypy src/driftwatch || true
 
-eval:           ## run drift dataset -> recall / FP-rate / p95 / inverse-scaling
-	$(PY) -m driftwatch.cli eval --dataset evaluation/datasets/drift.jsonl
+eval:           ## run drift dataset -> recall / FP-rate / p95 / inverse-scaling (+ results/)
+	PYTHONPATH=src $(PY) -m driftwatch.cli eval --dataset evaluation/datasets/drift.jsonl --out evaluation/results
 
 clean:
 	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache .ruff_cache .mypy_cache

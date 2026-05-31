@@ -130,8 +130,10 @@ def eval_main(argv: list[str] | None = None) -> int:
     from .evaluation_runner import run_eval  # S5
     parser = argparse.ArgumentParser(prog="driftwatch eval")
     parser.add_argument("--dataset", required=True)
+    parser.add_argument("--out", default=None,
+                        help="dir to write results (json/txt/jsonl); omit for stdout only")
     args = parser.parse_args(argv)
-    return run_eval(args.dataset)
+    return run_eval(args.dataset, out_dir=args.out)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,11 +143,16 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("scenario")
     e = sub.add_parser("eval", help="run the drift evaluation dataset")
     e.add_argument("--dataset", required=True)
+    e.add_argument("--out", default=None,
+                   help="dir to write results (json/txt/jsonl); omit for stdout only")
     args = parser.parse_args(argv)
     if args.cmd == "demo":
         return run_demo(args.scenario)
     if args.cmd == "eval":
-        return eval_main(["--dataset", args.dataset])
+        argv_eval = ["--dataset", args.dataset]
+        if args.out:
+            argv_eval += ["--out", args.out]
+        return eval_main(argv_eval)
     return 2
 
 
