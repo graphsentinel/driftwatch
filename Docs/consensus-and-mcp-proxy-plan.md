@@ -65,21 +65,21 @@ existing `Reconciler.seed_from_models()`.
       with the consensus task types — this is exactly **TC-F-15** end-to-end.
 - [ ] `consensus_seed.json` records provenance for every seeded task.
 - **Test Cases:** **TC-F-15** (model seed + handover — the existing CFP case, now
-  executable); **TC-F-16** (majority keep / minority drop); **TC-F-17** (single-model
-  refusal). *(TC-F-16/17 are currently "reserved" in the CFP table — this fills them.)*
+  executable); **TC-F-18** (majority keep / minority drop); **TC-F-19** (single-model
+  refusal). *(TC-F-18/19 were added to the CFP test catalog for this; E7 owns TC-F-16/17.)*
 
 ### Gherkin
 ```gherkin
 Feature: Consensus baseline from a model panel (FR-9)
 
-  Scenario: A tool only one model proposes is excluded          # TC-F-16
+  Scenario: A tool only one model proposes is excluded          # TC-F-18
     Given 4 models proposing chains for task "investigate_latency"
     And only 1 of them proposes "DeleteNamespace"
     When the consensus baseline is built with majority quorum
     Then "DeleteNamespace" is NOT in the baseline's expected tools
     And tools proposed by >= 2 models ARE in the baseline
 
-  Scenario: Refuse to seed a task with too few voices           # TC-F-17
+  Scenario: Refuse to seed a task with too few voices           # TC-F-19
     Given only 1 model answered for task "rare_task"
     When consensus seeding runs
     Then "rare_task" is skipped (not seeded from a single model)
@@ -104,8 +104,8 @@ the **FR-9 consensus baseline**, and forwards survivors to the real ToolServer.
 
 **The seam:** Part 1 produces the baseline the E7 proxy reads. Same `BaselineStore`, same
 `score_chain` — E7 adds only the MCP transport shell (CFP: `tools/list` passthrough,
-`tools/call` → ToolCall → handle → forward / MCP-error). Tests **TC-F-13/14** (already in
-the CFP E7 section).
+`tools/call` → ToolCall → handle → forward / MCP-error). Tests **TC-F-16/17** (in the
+CFP E7 section + test catalog).
 
 ### Order of work
 1. **Part 1 (FR-9 producer) first** — no trustworthy baseline → nothing to enforce.
