@@ -15,6 +15,12 @@ with no auth — fully independent of where you built them.
 > in at deploy time via Helm `values` / `--set` and the `AgentDriftPolicy` CRD. That is
 > what lets a stranger reconfigure and run it without rebuilding.
 
+> **Tag vs digest.** The `:0.1.0a0` tag below is a *convenience* tag — it can be re-pushed,
+> so it is mutable. For anything that must be reproducible (a review, a runbook, the
+> on-stage demo) **pin the immutable digest** instead and install with
+> `--set-string image.digest=sha256:…` (the chart honors `image.digest` over the tag). The
+> tag-push steps below are the publish flow; see **[Release immutability](#release-immutability--pin-the-digest-dont-trust-the-tag)** for cutting a fresh alpha tag, capturing the digest, and verifying published-vs-running.
+
 ---
 
 ## Path A — manual, no GitHub Actions (recommended for you)
