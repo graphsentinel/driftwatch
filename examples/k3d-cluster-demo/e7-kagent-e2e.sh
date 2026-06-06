@@ -19,6 +19,15 @@ UPSTREAM_MCP="${UPSTREAM_MCP:?set UPSTREAM_MCP to the real MCP ToolServer URL th
 CHART="${CHART:-oci://ghcr.io/graphsentinel/charts/driftwatch}"
 VERSION="${VERSION:-0.1.0}"
 
+echo "== 0. configure Kagent's model provider (DriftWatch is provider-agnostic) =="
+# Default: Ollama (verified, key-free) — this also auto-registers host.k3d.internal so the
+# agent pod reaches host Ollama by a stable name (no IP in any manifest, portable). For a
+# cloud provider, pass it + its key, e.g.:
+#   MODEL_PROVIDER=openai OPENAI_API_KEY=... ./e7-kagent-e2e.sh
+# For a remote Ollama: MODEL_PROVIDER=ollama OLLAMA_HOST=<ip-or-dns> ./e7-kagent-e2e.sh
+MODEL_PROVIDER="${MODEL_PROVIDER:-ollama}" CLUSTER="${CLUSTER:-driftwatch-demo}" \
+  "$(dirname "$0")/setup-kagent-model.sh"
+
 echo "== 1. deploy/upgrade DriftWatch with the MCP proxy enabled =="
 # image must carry the .[mcp] extra (fastmcp); persistence on so the proxy can mount the
 # operator-written baseline read-only.

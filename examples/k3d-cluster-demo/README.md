@@ -83,14 +83,55 @@ helm install kagent      oci://ghcr.io/kagent-dev/kagent/helm/kagent      -n kag
 # Goose runs from the official image: ghcr.io/block/goose
 ```
 
-That MCP tool-call hop *is* the decision plane DriftWatch governs. The integration point
-is to register DriftWatch as an **MCP proxy** (point Kagent's `RemoteMCPServer` at it);
-it scores each `(tool, scope, argSchemaHash)` and `log`/`drop`/`block`s before the call
-reaches the real ToolServer.
+That MCP tool-call hop *is* the decision plane DriftWatch governs. Register DriftWatch as an
+**MCP proxy** (point Kagent's `RemoteMCPServer` at it); it scores each
+`(tool, scope, argSchemaHash)` and `log`/`drop`/`block`s before the call reaches the real
+ToolServer. The chain-aware MCP proxy is implemented (E7) and validated in-cluster against a
+real Kubernetes MCP ToolServer (E8); driving it from a real Kagent client (E9) is the gated
+next step — see `e7-kagent-e2e.sh`.
 
-> **Roadmap:** the DriftWatch **MCP-proxy adapter** for path B is the next sprint. Until
-> it lands, the stand-in (path A) is the supported live-demo path and `make demo` is the
-> in-process equivalent.
+### Choosing the model provider (Kagent)
+
+The agent needs an LLM. **DriftWatch is provider-agnostic** — it governs the tool-selection
+chain, not which model produced it — so you pick whatever provider you run. `make kagent-model`
+(wrapping `setup-kagent-model.sh`) configures Kagent's `ModelConfig` + an API-key Secret; **keys
+are read from your environment and never written into a script.**
+
+| Provider | Command | Support |
+|---|---|---|
+| **Ollama** (default) | `make kagent-model MODEL_PROVIDER=ollama` | **verified** — key-free; auto-wires `host.k3d.internal` |
+| OpenAI | `make kagent-model MODEL_PROVIDER=openai OPENAI_API_KEY=...` | scaffolded |
+| Anthropic | `make kagent-model MODEL_PROVIDER=anthropic ANTHROPIC_API_KEY=...` | scaffolded |
+| Gemini | `make kagent-model MODEL_PROVIDER=gemini GEMINI_API_KEY=...` | scaffolded |
+| Azure OpenAI | `make kagent-model MODEL_PROVIDER=azure AZURE_API_KEY=... AZURE_ENDPOINT=...` | scaffolded |
+| Bedrock | `make kagent-model MODEL_PROVIDER=bedrock AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...` | scaffolded |
+
+Override the model name with `MODEL=<name>`. The agent's model **must support function calling**
+(Kagent calls tools); e.g. `qwen3-coder-next:cloud` on Ollama does.
+
+> **Two levels of honesty.** *Ollama* is the **verified** path used for this demo. The cloud
+> providers are **scaffolded**: the script validates the key, creates the Secret, and emits a
+> `ModelConfig` — but provider-specific fields track the Kagent chart version, so verify against
+> your install (`kubectl explain modelconfig.spec`).
+
+#### Where Ollama runs (network reachability)
+
+The agent pod runs inside k3d; Ollama usually doesn't. `setup-kagent-model.sh` (provider
+`ollama`) calls `register-host-alias.sh` for you, so manifests stay IP-free:
+
+| Where Ollama runs | What to pass | Reach it as |
+|---|---|---|
+| **On the k3d host** (default) | nothing — host gateway discovered automatically | `http://host.k3d.internal:11434` |
+| **On a separate server** | `OLLAMA_HOST=<ip-or-dns>` | `http://host.k3d.internal:11434` |
+| **Inside the cluster** (self-contained) | deploy Ollama as a Service; `OLLAMA_BASE_URL=http://ollama.<ns>.svc:11434` | that Service URL |
+
+> Ollama must listen on all interfaces (`OLLAMA_HOST=0.0.0.0` on the server), not just localhost,
+> so the cluster can reach it.
+
+> **Scope note:** the **core demo (path A, the five scenarios) needs none of this** — no model
+> provider, no host alias, no Ollama. Provider setup + host alias exist **only** for E9 (real
+> Kagent). Keeping them out of `cluster-up` keeps the core demo clean; `e7-kagent-e2e.sh` (step 0)
+> or `make kagent-model` sets them up on demand.
 
 ## Tear down
 
