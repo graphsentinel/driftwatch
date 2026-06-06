@@ -112,14 +112,38 @@ def _drift_middleware_class():
 
 
 def build_mcp_proxy(upstream, factory: InterceptorFactory):
-    """Wire a FastMCP proxy in front of `upstream`, with DriftWatch scoring middleware.
+    """Wire a FastMCP proxy in front of `upstream`(s), with DriftWatch scoring middleware.
 
-    `upstream` is anything `fastmcp.server.create_proxy` accepts (an upstream URL, a FastMCP
-    server, a Client/transport — e.g. the real MCP ToolServer). `factory` produces a per-session
-    Interceptor. Returns the proxy FastMCP app (serve it, or drive it with an in-memory
-    Client in tests).
+    Two shapes (E10 — cross-server, FR-16/FR-17):
+
+    - **Single upstream** (backward compatible): anything `create_proxy` accepts — an upstream
+      URL, a FastMCP server, a Client/transport, or an MCPConfig (`{"mcpServers": {...}}`).
+      One real MCP ToolServer behind one governance seat (E7/E8).
+
+    - **Multiple upstreams**: a `{server_name: target}` mapping (NOT an MCPConfig). Each target
+      is proxied and **mounted under its name**, so the aggregated `tools/list` surfaces the
+      union as `<server>_<tool>` (per-server namespacing → tool **name collisions** between
+      servers are resolved by construction — FR-16). One scoring middleware sits on the
+      aggregator and sees every call with its namespaced name, so the **cross-server
+      transition falls out of the existing n-gram**: a hop from one server to another that the
+      baseline never saw is a novel transition, gated like any sequence drift (FR-17). The
+      whole multi-server chain is one session-correlated `DecisionChain`.
+
+    `factory` produces a per-session Interceptor. Returns the proxy FastMCP app (serve it, or
+    drive it with an in-memory Client in tests).
     """
     from fastmcp.server import create_proxy
+
+    # Multi-upstream: a plain {name: target} mapping. An MCPConfig is also a dict but carries
+    # "mcpServers" — that goes to create_proxy as a single (FastMCP-namespaced) target.
+    if isinstance(upstream, dict) and "mcpServers" not in upstream:
+        from fastmcp import FastMCP
+
+        aggregator = FastMCP("driftwatch-aggregator")
+        for name, target in upstream.items():
+            aggregator.mount(create_proxy(target), namespace=name)
+        aggregator.add_middleware(_drift_middleware_class()(factory))
+        return aggregator
 
     proxy = create_proxy(upstream)
     proxy.add_middleware(_drift_middleware_class()(factory))

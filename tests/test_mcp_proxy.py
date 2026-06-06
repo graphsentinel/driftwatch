@@ -172,3 +172,90 @@ def test_scoring_is_over_the_accumulated_chain():
 
     asyncio.run(go())
     assert called == ["QueryLogs"]  # only the within-baseline call reached upstream
+
+
+# --- E10: cross-server chain governance (FR-16 aggregation, FR-17 cross-server transition) ---
+
+def _ready_store_cross(task="x"):
+    """Baseline for a cross-server task: the normal order is policy_set_context (on the policy
+    server) THEN k8s_namespaces_list (on the kubernetes server). Tool names are the *namespaced*
+    names the aggregator surfaces (`<server>_<tool>`), because that is exactly what the
+    middleware sees — so the n-gram learns the cross-server transition just like any other."""
+    store = BaselineStore(window=50)
+    for _ in range(5):
+        c = DecisionChain(task_type=task)
+        c.add(ToolCall(tool="policy_set_context", arguments={"env": "dev"}, category="policy"))
+        c.add(ToolCall(tool="k8s_namespaces_list", arguments={}, category="k8s"))
+        store.fold(c)
+    return store
+
+
+def _fake_cross_upstreams():
+    k8s = FastMCP("k8s")
+    k8s_called = []
+
+    @k8s.tool
+    def namespaces_list() -> str:
+        k8s_called.append("namespaces_list")
+        return "NS_OK"
+
+    @k8s.tool
+    def delete_namespace(namespace: str = "") -> str:
+        k8s_called.append("delete_namespace")
+        return "DELETED"
+
+    policy = FastMCP("policy")
+    policy_called = []
+
+    @policy.tool
+    def set_context(env: str = "") -> str:
+        policy_called.append("set_context")
+        return f"ctx={env}"
+
+    return k8s, k8s_called, policy, policy_called
+
+
+def _cross_proxy(action="block"):
+    template = Interceptor(_ready_store_cross(), KagentAdapter(task_type="x"), action=action)
+    factory = make_session_interceptor_factory(template, task_type="x")
+    k8s, k8s_called, policy, policy_called = _fake_cross_upstreams()
+    # multi-upstream: a {name: target} mapping → one aggregated, namespaced surface
+    proxy = build_mcp_proxy({"k8s": k8s, "policy": policy}, factory)
+    return proxy, k8s_called, policy_called
+
+
+def test_tc_f_38_cross_server_aggregation_and_within_baseline_forward():  # TC-F-38
+    """One proxy fronts TWO MCP servers: tools/list is the union, per-server namespaced; a
+    within-baseline cross-server chain is forwarded, each call routed to its real upstream."""
+    proxy, k8s_called, policy_called = _cross_proxy()
+
+    async def go():
+        async with Client(proxy) as c:
+            tools = sorted(t.name for t in await c.list_tools())
+            r1 = await c.call_tool("policy_set_context", {"env": "dev"})   # within baseline (1st)
+            r2 = await c.call_tool("k8s_namespaces_list", {})              # in-baseline transition
+            return tools, getattr(r1, "data", None), getattr(r2, "data", None)
+
+    tools, r1, r2 = asyncio.run(go())
+    # FR-16: aggregated, namespaced union — name collisions between servers impossible by design
+    assert tools == ["k8s_delete_namespace", "k8s_namespaces_list", "policy_set_context"]
+    assert r1 == "ctx=dev" and r2 == "NS_OK"          # both reached their real upstreams
+    assert policy_called == ["set_context"] and k8s_called == ["namespaces_list"]
+
+
+def test_tc_f_39_cross_server_transition_drift_blocked():  # TC-F-39
+    """The case no single-server gateway can hold: each tool is within-baseline on its own
+    server, but the *hop between servers* is novel. Baseline order is policy→k8s; the reversed
+    k8s→policy transition is gated, and the second upstream never sees the call."""
+    proxy, k8s_called, policy_called = _cross_proxy()
+
+    async def go():
+        async with Client(proxy) as c:
+            await c.call_tool("k8s_namespaces_list", {})                   # 1st, within baseline → forward
+            with pytest.raises(ToolError):
+                await c.call_tool("policy_set_context", {"env": "dev"})    # novel cross-server hop → block
+
+    asyncio.run(go())
+    assert k8s_called == ["namespaces_list"]   # the first call reached the k8s upstream
+    assert policy_called == []                  # the cross-server drift NEVER reached the policy upstream
+    # both tools are individually in-baseline — a per-call gateway on either server would allow each
