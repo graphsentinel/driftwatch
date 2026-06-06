@@ -259,3 +259,19 @@ def test_tc_f_39_cross_server_transition_drift_blocked():  # TC-F-39
     assert k8s_called == ["namespaces_list"]   # the first call reached the k8s upstream
     assert policy_called == []                  # the cross-server drift NEVER reached the policy upstream
     # both tools are individually in-baseline — a per-call gateway on either server would allow each
+
+
+def test_cross_server_rejects_collision_prone_server_names():  # FR-16 collision guard
+    """Namespacing is provably collision-free only if server names carry no '_': server 'a_b' +
+    tool 'c' and server 'a' + tool 'b_c' would both yield 'a_b_c'. build_mcp_proxy rejects such
+    names up front rather than silently producing an ambiguous tool surface."""
+    template = Interceptor(_ready_store_cross(), KagentAdapter(task_type="x"))
+    factory = make_session_interceptor_factory(template, task_type="x")
+    k8s, _, policy, _ = _fake_cross_upstreams()
+
+    with pytest.raises(ValueError, match="collision-free"):
+        build_mcp_proxy({"a_b": k8s, "a": policy}, factory)   # 'a_b' has '_' → rejected
+
+    # a valid pair (no '_', unique) builds fine
+    proxy = build_mcp_proxy({"k8s": k8s, "policy": policy}, factory)
+    assert proxy is not None

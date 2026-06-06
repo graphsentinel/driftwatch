@@ -111,6 +111,27 @@ def _drift_middleware_class():
     return DriftMiddleware
 
 
+def _validate_server_names(upstream: dict) -> None:
+    """Guard that multi-upstream tool namespacing is **provably collision-free** (FR-16).
+
+    Tools surface as ``f"{server}_{tool}"``. If a server name contained ``_``, two different
+    (server, tool) pairs could collapse to the same namespaced name — e.g. server ``a_b`` + tool
+    ``c`` and server ``a`` + tool ``b_c`` both yield ``a_b_c``. Forbidding ``_`` in server names
+    (and requiring them unique + alphanumeric/``-``) makes the segment up to the first ``_`` map
+    back to exactly one server, so no two tools can collide. Names must also be non-empty.
+    """
+    names = list(upstream)
+    for n in names:
+        if not n or "_" in n or not n.replace("-", "").isalnum():
+            raise ValueError(
+                f"invalid upstream server name {n!r}: server names must be non-empty, "
+                "alphanumeric (with '-'), and contain no '_', so per-server tool namespacing "
+                "(<server>_<tool>) stays collision-free (FR-16)"
+            )
+    if len(set(names)) != len(names):
+        raise ValueError(f"duplicate upstream server names are not allowed: {names}")
+
+
 def build_mcp_proxy(upstream, factory: InterceptorFactory):
     """Wire a FastMCP proxy in front of `upstream`(s), with DriftWatch scoring middleware.
 
@@ -139,6 +160,7 @@ def build_mcp_proxy(upstream, factory: InterceptorFactory):
     if isinstance(upstream, dict) and "mcpServers" not in upstream:
         from fastmcp import FastMCP
 
+        _validate_server_names(upstream)  # FR-16: keep namespacing provably collision-free
         aggregator = FastMCP("driftwatch-aggregator")
         for name, target in upstream.items():
             aggregator.mount(create_proxy(target), namespace=name)
