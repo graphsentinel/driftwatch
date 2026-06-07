@@ -1,8 +1,9 @@
 # E10 — reconnect-on-session-terminated at the call hop (design)
 
-**Status:** design (pre-implementation). Closes the last E10 gap: a *clean, repeatable*
-cross-server **call-path** e2e. Aggregation (FR-16) + cross-server scoring (FR-17) are already
-validated in-cluster; only the forward-to-upstream call flakes.
+**Status:** **implemented** (commit `26c93f0`) and validated in-cluster. Closed the last E10 gap:
+a *clean, repeatable* cross-server **call-path** e2e. Aggregation (FR-16) + cross-server scoring
+(FR-17) were already validated in-cluster; the forward-to-upstream call (which flaked on the
+upstream's idle-session termination) now survives via reconnect.
 
 ## Problem
 
@@ -49,32 +50,36 @@ closed before/at request dispatch). But "usually" is not "always", so:
 - **Write/destructive tools** (risk tier high; `delete`/`create`/`apply`/`scale`-shaped): retry is
   **off by default** — a second execution could double-act (delete twice, etc.). A destructive
   call that hits a session fault returns the error to the agent (which, per E9, does not retry-storm).
-- The risk tier is the existing `ToolCall.risk` / `category` the detector already computes; no new
-  signal. Config knob `mcpProxy.reconnect.retryDestructive` (default `false`) can override for
-  upstreams known to be idempotent.
+- **As implemented:** the guard is `_looks_destructive(tool, risk, destructive_risk)`. It uses the
+  detector's `ToolCall.risk` tier when available, **but** at the MCP hop the adapter usually has no
+  catalog so `risk == 0` — relying on risk alone would silently make destructive calls
+  retry-eligible. So it **falls back to a conservative tool-name heuristic**: a name containing any
+  of `delete/remove/destroy/drain/evict/create/apply/patch/update/replace/scale/restart/exec/...`
+  is treated as destructive and not retried. Read-shaped names (`list/get/watch/describe/...`) stay
+  retry-eligible. Opt-in override: `retry_destructive=True`.
 
 This keeps the governance project's safety posture: **we never turn a transport retry into an
-unintended second destructive action.**
+unintended second destructive action** — even when the upstream's tool risk is unknown.
 
-### D4 — Observable retries
-Emit the retry on the *same* decision span (score-once), so the audit trail shows one governed
-decision plus its transport recovery:
-- `gen_ai.agent.gate.forward.retried = true`
-- `gen_ai.agent.gate.forward.retry_count = <n>`
-- `gen_ai.agent.gate.forward.retry_reason = "session_terminated"`
-No new top-level event; no `drift.*` namespace (C1).
+### D4 — Observable retries *(roadmap — not yet wired in v1alpha1)*
+Intended: annotate the retry on the *same* decision span (score-once), so the audit trail shows one
+governed decision plus its transport recovery — `gen_ai.agent.gate.forward.retried/retry_count/
+retry_reason`; no new event; no `drift.*` namespace (C1). **Status:** the retry is bounded and
+score-once today, but these OTel attributes are **not emitted yet** — roadmap.
 
 ### D5 — Bounded
-At most `mcpProxy.reconnect.maxRetries` (default `2`) re-establish+retry attempts, with a short
-backoff. If still failing, surface the original session error to the caller (fail toward the
-declared `failurePolicy`).
+At most `max_retries` (**default `2`, hard-coded in `DriftMiddleware` for v1alpha1**) re-establish+
+retry attempts, with a short backoff. If still failing, surface the original session error to the
+caller (fail toward the declared `failurePolicy`). **Config:** `max_retries` / `retry_destructive`
+are constructor knobs with safe defaults; **Helm `mcpProxy.reconnect.*` values are roadmap** (not
+exposed yet) — the safe defaults apply.
 
 ## Architecture
 
 The forward path today: `on_call_tool` → (score) → `call_next` → FastMCP mount → upstream
 long-lived client (from the lifespan). The flake is inside `call_next` → that client's session.
 
-Two implementation options — to be settled by a venv probe (next step):
+**Chosen: Option B** (probe-confirmed in venv, then implemented). Two options were considered:
 
 - **Option A — reconnect the lifespan client.** Share the per-upstream client/proxy handles with
   the middleware; on a session-class failure, close+reopen that upstream's `Client`, re-mount its
@@ -87,19 +92,21 @@ Two implementation options — to be settled by a venv probe (next step):
   (acceptable — these are governance hops, not a hot loop; latency budget is per-call scoring, not
   connection setup). Routing/namespacing we already own (`_validate_server_names`).
 
-**Leaning B**: it sidesteps the reused-session class of bug rather than fighting FastMCP's mount
+**Why B**: it sidesteps the reused-session class of bug rather than fighting FastMCP's mount
 session reuse, and reconnect becomes "open a new client and try again" — trivially correct and
-score-once-friendly. Confirm with a probe that a fresh per-call `Client(url)` to
-`kubernetes-mcp-server` is stable under D1/D3 before wiring it in.
+score-once-friendly. A venv probe confirmed a fresh per-call `Client(url)` to
+`kubernetes-mcp-server` is stable under idle gaps; `tools/list` continues to serve from the
+lifespan long-lived clients (mount). Implemented in `DriftMiddleware._forward_fresh`.
 
-## Acceptance (what "done" adds to E10)
-- [ ] Clean, repeatable in-cluster within-baseline **cross-server forward** to two real upstreams,
-      returning data (the gap today).
-- [ ] A session-class fault is transparently recovered (read-class), the call succeeds, OTel shows
-      `forward.retried=true`, scoring ran once.
-- [ ] A destructive call under a session fault is **not** double-executed (retry off by default).
-- [ ] Single-upstream path (E7/E8/E9) unchanged and green.
-- [ ] Unit tests: session-class retry (read) succeeds; non-session error not retried; destructive
+## Acceptance (what "done" added to E10)
+- [x] Clean, repeatable in-cluster within-baseline **cross-server forward** to two real upstreams,
+      returning data (after a 3 s idle gap, no client-side retry). *(in-cluster TC-F-38)*
+- [x] A session-class fault is transparently recovered (read-class), the call succeeds, scoring
+      ran once. *(unit: reconnect-retry + score-once tests; OTel retry attributes are roadmap, D4)*
+- [x] A destructive call under a session fault is **not** double-executed (retry off by default,
+      tool-name heuristic when risk is unknown). *(unit: destructive-not-retried test)*
+- [x] Single-upstream path (E7/E8/E9) unchanged and green. *(call_next when no upstream map)*
+- [x] Unit tests: session-class retry (read) succeeds; non-session error not retried; destructive
       not retried by default; score-once (chain appended once).
 
 ## Out of scope

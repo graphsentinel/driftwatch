@@ -78,6 +78,32 @@ def _result_error_text(res) -> str:
     return " ".join(parts)
 
 
+# Conservative write/destructive verbs in a tool name. Used as a SAFETY FALLBACK for the
+# reconnect retry guard (D3): at the MCP hop the upstream's tool risk is often unknown
+# (the adapter has no catalog → risk=0), so we must NOT infer "safe to retry" from risk alone.
+# A tool whose name contains any of these is treated as destructive and is not retried on a
+# session fault by default — a transport retry must never double-execute a delete/create/etc.
+_DESTRUCTIVE_VERBS = (
+    "delete", "remove", "destroy", "drain", "evict", "cordon", "uncordon",
+    "create", "apply", "patch", "update", "replace", "edit", "set", "write",
+    "put", "post", "scale", "restart", "rollout", "exec", "attach", "cp",
+)
+
+
+def _looks_destructive(tool_name: str, risk: int, destructive_risk: int) -> bool:
+    """True if a call should be treated as destructive for the retry guard (D3).
+
+    Destructive if the detector's risk tier says so, OR — as a safety fallback when risk is
+    unknown (0, the common case at the MCP hop with no catalog) — if the tool name contains a
+    write/destructive verb. Read-shaped tools (list/get/watch/describe/...) are not flagged, so
+    they remain retry-eligible.
+    """
+    if risk >= destructive_risk:
+        return True
+    low = tool_name.lower()
+    return any(v in low for v in _DESTRUCTIVE_VERBS)
+
+
 def _drift_middleware_class():
     """Build the DriftMiddleware class against the (opt-in) fastmcp API."""
     import asyncio
@@ -98,13 +124,14 @@ def _drift_middleware_class():
 
         def __init__(self, factory: InterceptorFactory, upstreams: "dict | None" = None,
                      max_retries: int = 2, retry_destructive: bool = False,
-                     destructive_risk: int = 3):
+                     destructive_risk: int = 3, client_cls=None):
             self._factory = factory
             self._sessions: dict[str, Interceptor] = {}
             self._upstreams = upstreams           # multi-upstream call routing (None = single)
             self._max_retries = max_retries
             self._retry_destructive = retry_destructive
             self._destructive_risk = destructive_risk
+            self._client_cls = client_cls         # injectable for tests; default fastmcp.Client
 
         def _interceptor_for(self, context) -> Interceptor:
             ctx = getattr(context, "fastmcp_context", None)
@@ -158,22 +185,25 @@ def _drift_middleware_class():
         async def _forward_fresh(self, namespaced: str, args: dict, risk: int):
             """Route a namespaced tool call to its upstream with a fresh client, retrying the
             session-fault class only (E10 reconnect; design: Docs/e10-reconnect-design.md)."""
-            from fastmcp import Client
+            client_cls = self._client_cls
+            if client_cls is None:
+                from fastmcp import Client as client_cls  # noqa: N813 — default, injectable in tests
 
             server, sep, tool = namespaced.partition("_")  # server name has no "_" (guard FR-16)
             url = (self._upstreams or {}).get(server) if sep else None
             if url is None:
                 raise ToolError(f"no upstream for tool {namespaced!r} (server {server!r})")
 
-            # D3 idempotency: don't risk double-executing a destructive call on a retry.
-            destructive = risk >= self._destructive_risk
+            # D3 idempotency: don't risk double-executing a destructive call on a retry. Risk is
+            # often 0 at the MCP hop (no catalog), so fall back to a tool-name heuristic.
+            destructive = _looks_destructive(tool, risk, self._destructive_risk)
             attempts = 1 if (destructive and not self._retry_destructive) else self._max_retries + 1
 
             last: Exception | None = None
             for i in range(attempts):
                 err_text = None
                 try:
-                    async with Client(url) as c:       # fresh session per attempt (reconnect)
+                    async with client_cls(url) as c:   # fresh session per attempt (reconnect)
                         res = await c.call_tool_mcp(tool, args)
                     if not getattr(res, "isError", False):
                         return ToolResult(

@@ -307,3 +307,148 @@ def test_is_session_fault_classifies_only_session_class():  # E10 reconnect (D1)
     assert not _is_session_fault(Exception("invalid arguments"))
     assert not _is_session_fault(Exception("blocked by DriftWatch: decision drift"))
     assert not _is_session_fault(Exception("upstream error from k8s_pods_delete"))
+
+
+def test_looks_destructive_falls_back_to_tool_name_when_risk_unknown():  # E10 reconnect (D3)
+    """The retry guard must treat write/destructive tools as destructive even when risk is 0
+    (the common MCP-hop case with no catalog) — so a transport retry never double-deletes."""
+    from driftwatch.interceptor.mcp_proxy import _looks_destructive
+
+    # risk unknown (0), but the name says destructive → guarded
+    assert _looks_destructive("pods_delete", 0, 3)
+    assert _looks_destructive("create_namespace", 0, 3)
+    assert _looks_destructive("scale_deployment", 0, 3)
+    assert _looks_destructive("nodes_drain", 0, 3)
+    # read-shaped → retry-eligible
+    assert not _looks_destructive("namespaces_list", 0, 3)
+    assert not _looks_destructive("pods_get", 0, 3)
+    assert not _looks_destructive("events_list", 0, 3)
+    # risk tier alone is enough even for a read-named tool
+    assert _looks_destructive("namespaces_list", 4, 3)
+
+
+# --- reconnect _forward_fresh retry behavior (D1/D2/D3), driven by a fake faulting client ---
+
+def _fake_result(is_error=False, text="", structured=None):
+    """Minimal stand-in for an MCP CallToolResult (isError + text content blocks)."""
+    import types as _t
+    block = _t.SimpleNamespace(text=text) if text else None
+    return _t.SimpleNamespace(
+        isError=is_error,
+        content=[block] if block else [],
+        structuredContent=structured,
+    )
+
+
+def _fake_client_cls(script):
+    """A fastmcp.Client-shaped class whose call_tool_mcp follows `script` (one entry per attempt).
+    A new instance is created per attempt (fresh client), so attempt state lives in the closure."""
+    state = {"n": 0}
+
+    class FakeClient:
+        def __init__(self, url):
+            self.url = url
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def call_tool_mcp(self, tool, args):
+            beh = script[min(state["n"], len(script) - 1)]
+            state["n"] += 1
+            return beh()   # returns a fake result or raises
+
+    return FakeClient, state
+
+
+def _mw_with(client_cls, **kw):
+    from driftwatch.interceptor.mcp_proxy import _drift_middleware_class
+    MW = _drift_middleware_class()
+    return MW(factory=lambda: None, upstreams={"k8s": "http://k8s/mcp"},
+              client_cls=client_cls, **kw)
+
+
+def test_reconnect_retries_session_fault_then_succeeds():  # D1
+    """First attempt hits a session fault (as isError), second succeeds → reconnect retries
+    and returns the result."""
+    FakeClient, state = _fake_client_cls([
+        lambda: _fake_result(is_error=True, text="Session terminated"),
+        lambda: _fake_result(text="NS_OK", structured={"ok": True}),
+    ])
+    mw = _mw_with(FakeClient)
+    res = asyncio.run(mw._forward_fresh("k8s_namespaces_list", {}, 0))
+    assert state["n"] == 2                         # retried exactly once
+    assert getattr(res, "structured_content", None) == {"ok": True}
+
+
+def test_reconnect_does_not_retry_non_session_error():  # D1
+    """A non-session upstream error is surfaced immediately, never retried."""
+    FakeClient, state = _fake_client_cls([
+        lambda: _fake_result(is_error=True, text="invalid arguments"),
+        lambda: _fake_result(text="should-not-reach"),
+    ])
+    mw = _mw_with(FakeClient)
+    with pytest.raises(Exception):  # ToolError
+        asyncio.run(mw._forward_fresh("k8s_namespaces_list", {}, 0))
+    assert state["n"] == 1                          # no retry
+
+
+def test_reconnect_does_not_retry_destructive_by_default():  # D3
+    """A destructive call (by name) that hits a session fault is NOT retried by default —
+    no double-execution."""
+    FakeClient, state = _fake_client_cls([
+        lambda: _fake_result(is_error=True, text="Session terminated"),
+        lambda: _fake_result(text="should-not-reach"),
+    ])
+    mw = _mw_with(FakeClient)
+    with pytest.raises(Exception):  # ToolError
+        asyncio.run(mw._forward_fresh("k8s_pods_delete", {}, 0))   # risk 0, name destructive
+    assert state["n"] == 1                          # destructive → single attempt, no retry
+
+    # ...but retries when explicitly opted in
+    FakeClient2, state2 = _fake_client_cls([
+        lambda: _fake_result(is_error=True, text="Session terminated"),
+        lambda: _fake_result(text="DELETED"),
+    ])
+    mw2 = _mw_with(FakeClient2, retry_destructive=True)
+    asyncio.run(mw2._forward_fresh("k8s_pods_delete", {}, 0))
+    assert state2["n"] == 2                          # opt-in → retried
+
+
+def test_score_once_across_a_reconnect_retry():  # D2
+    """Scoring runs exactly once per tools/call; a session-fault retry re-runs only the upstream
+    forward, never the scoring (no phantom chain self-transition)."""
+    import types as _t
+
+    from driftwatch.interceptor.engine import FORWARD, Verdict
+    from driftwatch.interceptor.mcp_proxy import _drift_middleware_class
+
+    scored = {"n": 0}
+
+    class FakeInterceptor:
+        def __init__(self):
+            self.adapter = _t.SimpleNamespace(
+                chain=_t.SimpleNamespace(calls=[_t.SimpleNamespace(risk=0)]))
+
+        def handle(self, raw):
+            scored["n"] += 1
+            return Verdict(FORWARD, 200, None, {})
+
+    FakeClient, cstate = _fake_client_cls([
+        lambda: _fake_result(is_error=True, text="Session terminated"),
+        lambda: _fake_result(text="OK"),
+    ])
+    MW = _drift_middleware_class()
+    mw = MW(factory=FakeInterceptor, upstreams={"k8s": "http://k8s/mcp"}, client_cls=FakeClient)
+    ctx = _t.SimpleNamespace(
+        message=_t.SimpleNamespace(name="k8s_namespaces_list", arguments={}),
+        fastmcp_context=_t.SimpleNamespace(session_id="s1"))
+
+    async def _call_next(c):
+        raise AssertionError("multi-upstream must route via _forward_fresh, not call_next")
+
+    asyncio.run(mw.on_call_tool(ctx, _call_next))
+    assert scored["n"] == 1        # scored once
+    assert cstate["n"] == 2        # forward retried once (reconnect)
