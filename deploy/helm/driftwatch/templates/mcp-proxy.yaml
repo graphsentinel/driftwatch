@@ -1,11 +1,12 @@
 {{- if .Values.mcpProxy.enabled }}
 # E7 path-B — chain-aware MCP proxy (Deployment + Service). Real Kagent reaches it via a
 # RemoteMCPServer CR (see examples/k3d-cluster-demo/manifests/remotemcpserver.yaml). It
-# fronts the real MCP ToolServer (mcpProxy.upstreamMcp), scores each tools/call against the
+# fronts the real MCP ToolServer(s) — one (mcpProxy.upstreamMcp) or several
+# (mcpProxy.upstreams, cross-server E10) — scores each tools/call against the
 # operator-reconciled baseline (mounted read-only from the shared PVC), and forwards
 # survivors / denies drift with an MCP error. Needs the .[mcp] image extra (fastmcp).
-{{- if not .Values.mcpProxy.upstreamMcp }}
-{{- fail "mcpProxy.enabled=true requires mcpProxy.upstreamMcp (the real MCP ToolServer URL)" }}
+{{- if and (not .Values.mcpProxy.upstreamMcp) (not .Values.mcpProxy.upstreams) }}
+{{- fail "mcpProxy.enabled=true requires either mcpProxy.upstreamMcp (single URL) or mcpProxy.upstreams (list of {name,url} for cross-server)" }}
 {{- end }}
 {{- if not .Values.persistence.enabled }}
 {{- fail "mcpProxy.enabled=true requires persistence.enabled=true (a shared PVC for the operator-written baseline the proxy reads)" }}
@@ -39,7 +40,13 @@ spec:
           env:
             - { name: DRIFTWATCH_OTLP_ENDPOINT,   value: "{{ .Values.otel.endpoint }}" }
             - { name: DRIFTWATCH_DATA_DIR,        value: "/data" }     # read-only baseline mount
+            {{- if .Values.mcpProxy.upstreams }}
+            {{- $pairs := list }}
+            {{- range .Values.mcpProxy.upstreams }}{{ $pairs = append $pairs (printf "%s=%s" .name .url) }}{{- end }}
+            - { name: DRIFTWATCH_UPSTREAMS,       value: "{{ join "," $pairs }}" }   # cross-server (E10): name=url pairs
+            {{- else }}
             - { name: DRIFTWATCH_UPSTREAM_MCP,    value: "{{ .Values.mcpProxy.upstreamMcp }}" }
+            {{- end }}
             - { name: DRIFTWATCH_TASK_TYPE,       value: "{{ .Values.mcpProxy.taskType }}" }
             - { name: DRIFTWATCH_ACTION,          value: "{{ .Values.mcpProxy.action }}" }
             - { name: DRIFTWATCH_THRESHOLD,       value: "{{ .Values.mcpProxy.threshold }}" }

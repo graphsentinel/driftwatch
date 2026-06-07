@@ -158,12 +158,29 @@ def build_mcp_proxy(upstream, factory: InterceptorFactory):
     # Multi-upstream: a plain {name: target} mapping. An MCPConfig is also a dict but carries
     # "mcpServers" — that goes to create_proxy as a single (FastMCP-namespaced) target.
     if isinstance(upstream, dict) and "mcpServers" not in upstream:
-        from fastmcp import FastMCP
+        from contextlib import AsyncExitStack, asynccontextmanager
+
+        from fastmcp import Client, FastMCP
 
         _validate_server_names(upstream)  # FR-16: keep namespacing provably collision-free
-        aggregator = FastMCP("driftwatch-aggregator")
-        for name, target in upstream.items():
-            aggregator.mount(create_proxy(target), namespace=name)
+
+        @asynccontextmanager
+        async def _lifespan(app):
+            # E10 in-cluster fix. Open ONE long-lived client per upstream for the server's
+            # lifetime and mount a proxy over it — instead of letting the proxy open/close a
+            # session per request. Real upstreams that 404 on session teardown (e.g.
+            # kubernetes-mcp-server on DELETE /mcp) otherwise flake with "Session terminated"
+            # the moment a second request reuses a torn-down session; that broke multi-upstream
+            # aggregation in-cluster even though it passed against in-memory fakes. One session
+            # per upstream, held open for the server's life, is stable. (Single-upstream keeps
+            # the simple create_proxy path below, unchanged — E7/E8/E9.)
+            async with AsyncExitStack() as stack:
+                for name, target in upstream.items():
+                    client = await stack.enter_async_context(Client(target))
+                    app.mount(create_proxy(client), namespace=name)
+                yield
+
+        aggregator = FastMCP("driftwatch-aggregator", lifespan=_lifespan)
         aggregator.add_middleware(_drift_middleware_class()(factory))
         return aggregator
 
@@ -172,11 +189,42 @@ def build_mcp_proxy(upstream, factory: InterceptorFactory):
     return proxy
 
 
+def parse_upstreams_env(multi: str, single: str):
+    """Resolve the proxy's upstream(s) from env, back-compatibly (E10 deploy wiring).
+
+    - `DRIFTWATCH_UPSTREAMS` (multi, **takes precedence**): a comma-separated list of
+      `name=url` pairs → a `{name: url}` mapping that `build_mcp_proxy` mounts under per-server
+      namespaces (cross-server). E.g. `k8s=http://a/mcp,policy=http://b/mcp`.
+    - else `DRIFTWATCH_UPSTREAM_MCP` (single, back-compat): one URL string → single-upstream proxy.
+
+    Returns a dict for multi, or the single URL string (possibly empty) otherwise.
+    """
+    multi = (multi or "").strip()
+    if multi:
+        out: dict[str, str] = {}
+        for pair in multi.split(","):
+            pair = pair.strip()
+            if not pair:
+                continue
+            name, sep, url = pair.partition("=")
+            if not sep or not name.strip() or not url.strip():
+                raise ValueError(
+                    f"invalid DRIFTWATCH_UPSTREAMS entry {pair!r}: expected 'name=url' pairs "
+                    "comma-separated, e.g. 'k8s=http://a/mcp,policy=http://b/mcp'"
+                )
+            out[name.strip()] = url.strip()
+        return out
+    return (single or "").strip()
+
+
 def run() -> None:  # pragma: no cover - console entry point
-    """`driftwatch-mcp` entry point: proxy the upstream MCP ToolServer with enforcement."""
+    """`driftwatch-mcp` entry point: proxy the upstream MCP ToolServer(s) with enforcement."""
     from .main import build_default_interceptor
 
-    upstream = os.environ.get("DRIFTWATCH_UPSTREAM_MCP", "")
+    upstream = parse_upstreams_env(
+        os.environ.get("DRIFTWATCH_UPSTREAMS", ""),
+        os.environ.get("DRIFTWATCH_UPSTREAM_MCP", ""),
+    )
     task_type = os.environ.get("DRIFTWATCH_TASK_TYPE", "")
     template = build_default_interceptor()  # policy + baseline from env / shared store (FR-10)
     proxy = build_mcp_proxy(upstream, make_session_interceptor_factory(template, task_type))

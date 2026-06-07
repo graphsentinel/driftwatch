@@ -275,3 +275,21 @@ def test_cross_server_rejects_collision_prone_server_names():  # FR-16 collision
     # a valid pair (no '_', unique) builds fine
     proxy = build_mcp_proxy({"k8s": k8s, "policy": policy}, factory)
     assert proxy is not None
+
+
+def test_parse_upstreams_env_multi_and_single():  # E10 deploy wiring
+    """The driftwatch-mcp entrypoint resolves multi-upstream from DRIFTWATCH_UPSTREAMS
+    ('name=url' pairs) and falls back to single DRIFTWATCH_UPSTREAM_MCP (back-compat)."""
+    from driftwatch.interceptor.mcp_proxy import parse_upstreams_env
+
+    # multi takes precedence and parses into a {name: url} mapping
+    assert parse_upstreams_env("k8s=http://a/mcp,policy=http://b/mcp", "http://ignored") == {
+        "k8s": "http://a/mcp",
+        "policy": "http://b/mcp",
+    }
+    # single fallback when multi is empty
+    assert parse_upstreams_env("", "http://only/mcp") == "http://only/mcp"
+    assert parse_upstreams_env("", "") == ""
+    # malformed multi entry is rejected, not silently dropped
+    with pytest.raises(ValueError, match="name=url"):
+        parse_upstreams_env("k8s=http://a/mcp,broken", "")

@@ -74,7 +74,14 @@ webhook:
 mcpProxy:
   enabled: false
   port: 8000
-  upstreamMcp: ""        # REQUIRED when enabled: the real MCP ToolServer URL the proxy fronts
+  upstreamMcp: ""        # single-upstream: the real MCP ToolServer URL the proxy fronts
+  # cross-server (E10): front N MCP servers. Tools surface as "<name>_<tool>" (per-server
+  # namespacing); the cross-server transition is scored on the chain. Takes precedence over
+  # upstreamMcp. Names must be unique and contain no "_" (collision-free namespacing).
+  #   upstreams:
+  #     - { name: k8s,    url: "http://k8smcp-kubernetes-mcp-server.driftwatch.svc:8080/mcp" }
+  #     - { name: policy, url: "http://policy-mcp.driftwatch.svc:8080/mcp" }
+  upstreams: []          # provide upstreamMcp (single) OR upstreams (list) when enabled
   taskType: ""           # optional: scope per-session chains to one task type
   action: block          # log | drop | block
   threshold: "3.0"
