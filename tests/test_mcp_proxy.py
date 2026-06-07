@@ -293,3 +293,17 @@ def test_parse_upstreams_env_multi_and_single():  # E10 deploy wiring
     # malformed multi entry is rejected, not silently dropped
     with pytest.raises(ValueError, match="name=url"):
         parse_upstreams_env("k8s=http://a/mcp,broken", "")
+
+
+def test_is_session_fault_classifies_only_session_class():  # E10 reconnect (D1)
+    """Reconnect retries ONLY the upstream session-lifecycle class — never a DriftWatch verdict
+    or a genuine upstream tool error."""
+    from driftwatch.interceptor.mcp_proxy import _is_session_fault
+
+    assert _is_session_fault(Exception("Session terminated"))
+    assert _is_session_fault(Exception("MCP session not found"))
+    assert _is_session_fault(Exception("the session is closed"))
+    # NOT retried:
+    assert not _is_session_fault(Exception("invalid arguments"))
+    assert not _is_session_fault(Exception("blocked by DriftWatch: decision drift"))
+    assert not _is_session_fault(Exception("upstream error from k8s_pods_delete"))

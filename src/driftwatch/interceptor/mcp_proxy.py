@@ -54,18 +54,57 @@ def make_session_interceptor_factory(template: Interceptor, task_type: str = "")
     return _make
 
 
+def _is_session_fault(exc: Exception) -> bool:
+    """True for the upstream session-lifecycle class we retry (E10 reconnect, D1).
+
+    Real upstreams (e.g. kubernetes-mcp-server) terminate idle Streamable-HTTP sessions and 404
+    on `DELETE /mcp`, so a delayed call reuses a server-closed session. The fault surfaces two
+    ways — as a raised `McpError("Session terminated")` OR as a `call_tool_mcp` result with
+    `isError=True` whose text says the session is gone — so this is matched on the message text in
+    both paths. We retry ONLY this transport class — never a DriftWatch verdict or a genuine
+    upstream tool error.
+    """
+    s = str(exc).lower()
+    return "session terminated" in s or "session not found" in s or "session is closed" in s
+
+
+def _result_error_text(res) -> str:
+    """Concatenate the text of an MCP CallToolResult's content blocks (for isError inspection)."""
+    parts = []
+    for b in getattr(res, "content", None) or []:
+        t = getattr(b, "text", None)
+        if t:
+            parts.append(t)
+    return " ".join(parts)
+
+
 def _drift_middleware_class():
     """Build the DriftMiddleware class against the (opt-in) fastmcp API."""
+    import asyncio
+
     from fastmcp.exceptions import ToolError
     from fastmcp.server.middleware import Middleware
+    from fastmcp.tools.base import ToolResult
 
     class DriftMiddleware(Middleware):
         """Scores each `tools/call` against the caller's decision chain, then forwards,
-        drops, or blocks — the chain-aware enforcement the per-call gateway layer can't do."""
+        drops, or blocks — the chain-aware enforcement the per-call gateway layer can't do.
 
-        def __init__(self, factory: InterceptorFactory):
+        Multi-upstream (E10): when `upstreams` ({name: target}) is set, the forward is routed
+        by us with a **fresh client per call** + session-class retry, instead of the lifespan
+        mount's reused session — so a session-dropping upstream is survived (reconnect). Scoring
+        still runs exactly once, before the forward; retry re-runs only the upstream call.
+        """
+
+        def __init__(self, factory: InterceptorFactory, upstreams: "dict | None" = None,
+                     max_retries: int = 2, retry_destructive: bool = False,
+                     destructive_risk: int = 3):
             self._factory = factory
             self._sessions: dict[str, Interceptor] = {}
+            self._upstreams = upstreams           # multi-upstream call routing (None = single)
+            self._max_retries = max_retries
+            self._retry_destructive = retry_destructive
+            self._destructive_risk = destructive_risk
 
         def _interceptor_for(self, context) -> Interceptor:
             ctx = getattr(context, "fastmcp_context", None)
@@ -84,7 +123,7 @@ def _drift_middleware_class():
         async def on_call_tool(self, context, call_next):
             itc = self._interceptor_for(context)
             raw = to_engine_call(context.message.name, context.message.arguments)
-            verdict = itc.handle(raw)
+            verdict = itc.handle(raw)                 # SCORE ONCE (chain appended, decision made)
 
             if verdict.outcome in (BLOCK, DROP):
                 # At the MCP hop both deny verdicts surface as an MCP error so the upstream
@@ -105,8 +144,53 @@ def _drift_middleware_class():
                 if reason:
                     msg += f" — {reason}"
                 raise ToolError(msg)
-            # forward (within baseline / log / shadow): the call proceeds upstream
-            return await call_next(context)
+
+            # forward (within baseline / log / shadow): the call proceeds upstream.
+            if self._upstreams is None:
+                return await call_next(context)       # single-upstream — unchanged (E7/E8/E9)
+
+            # multi-upstream (E10): route by <server>_<tool>, fresh client + session-class retry.
+            risk = itc.adapter.chain.calls[-1].risk if itc.adapter.chain.calls else 0
+            return await self._forward_fresh(
+                context.message.name, context.message.arguments or {}, risk
+            )
+
+        async def _forward_fresh(self, namespaced: str, args: dict, risk: int):
+            """Route a namespaced tool call to its upstream with a fresh client, retrying the
+            session-fault class only (E10 reconnect; design: Docs/e10-reconnect-design.md)."""
+            from fastmcp import Client
+
+            server, sep, tool = namespaced.partition("_")  # server name has no "_" (guard FR-16)
+            url = (self._upstreams or {}).get(server) if sep else None
+            if url is None:
+                raise ToolError(f"no upstream for tool {namespaced!r} (server {server!r})")
+
+            # D3 idempotency: don't risk double-executing a destructive call on a retry.
+            destructive = risk >= self._destructive_risk
+            attempts = 1 if (destructive and not self._retry_destructive) else self._max_retries + 1
+
+            last: Exception | None = None
+            for i in range(attempts):
+                err_text = None
+                try:
+                    async with Client(url) as c:       # fresh session per attempt (reconnect)
+                        res = await c.call_tool_mcp(tool, args)
+                    if not getattr(res, "isError", False):
+                        return ToolResult(
+                            content=res.content,
+                            structured_content=getattr(res, "structuredContent", None),
+                        )
+                    err_text = _result_error_text(res)  # session fault surfaces here as isError
+                except Exception as e:                  # noqa: BLE001 — transport faults raise here
+                    err_text = str(e)
+                # An error (isError result OR raised exception). Retry only the session class.
+                last = ToolError(err_text or "upstream error")
+                if _is_session_fault(Exception(err_text or "")) and i < attempts - 1:
+                    await asyncio.sleep(0.4 * (i + 1))
+                    continue
+                raise ToolError(f"upstream error from {namespaced}: {(err_text or '')[:120]}")
+            assert last is not None
+            raise last
 
     return DriftMiddleware
 
@@ -181,7 +265,10 @@ def build_mcp_proxy(upstream, factory: InterceptorFactory):
                 yield
 
         aggregator = FastMCP("driftwatch-aggregator", lifespan=_lifespan)
-        aggregator.add_middleware(_drift_middleware_class()(factory))
+        # Pass the upstream map so the middleware routes calls itself (fresh client per call +
+        # session-class retry), surviving session-dropping upstreams (E10 reconnect). The
+        # lifespan mount above still serves tools/list (discovery) over its long-lived clients.
+        aggregator.add_middleware(_drift_middleware_class()(factory, upstreams=upstream))
         return aggregator
 
     proxy = create_proxy(upstream)
