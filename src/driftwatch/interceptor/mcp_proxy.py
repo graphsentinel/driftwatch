@@ -90,18 +90,27 @@ _DESTRUCTIVE_VERBS = (
 )
 
 
+def _tool_tokens(tool_name: str) -> set:
+    """Split a tool name into lowercase tokens on `_`/`-`/`.` and camelCase boundaries, so a
+    verb is matched as a whole token (e.g. `pods_delete`/`deleteNamespace` → {…, 'delete'}) and a
+    substring inside an unrelated word is not (`asset_list` → {'asset','list'}, no 'set')."""
+    import re
+
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", tool_name)   # camelCase → space
+    return {t for t in re.split(r"[ _\-.]+", spaced.lower()) if t}
+
+
 def _looks_destructive(tool_name: str, risk: int, destructive_risk: int) -> bool:
     """True if a call should be treated as destructive for the retry guard (D3).
 
     Destructive if the detector's risk tier says so, OR — as a safety fallback when risk is
-    unknown (0, the common case at the MCP hop with no catalog) — if the tool name contains a
-    write/destructive verb. Read-shaped tools (list/get/watch/describe/...) are not flagged, so
-    they remain retry-eligible.
+    unknown (0, the common case at the MCP hop with no catalog) — if a **token** of the tool name
+    is a write/destructive verb. Token-based (not substring) so `asset_list` isn't flagged by
+    `set`; read-shaped tools (list/get/watch/describe/...) stay retry-eligible.
     """
     if risk >= destructive_risk:
         return True
-    low = tool_name.lower()
-    return any(v in low for v in _DESTRUCTIVE_VERBS)
+    return bool(_tool_tokens(tool_name) & set(_DESTRUCTIVE_VERBS))
 
 
 def _drift_middleware_class():

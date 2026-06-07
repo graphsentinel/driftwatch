@@ -323,6 +323,12 @@ def test_looks_destructive_falls_back_to_tool_name_when_risk_unknown():  # E10 r
     assert not _looks_destructive("namespaces_list", 0, 3)
     assert not _looks_destructive("pods_get", 0, 3)
     assert not _looks_destructive("events_list", 0, 3)
+    # token-based, not substring: 'asset_list' must NOT be flagged by the 'set' substring
+    assert not _looks_destructive("asset_list", 0, 3)
+    assert not _looks_destructive("reset_view_get", 0, 3)   # 'reset' contains 'set' as substring only
+    # camelCase verbs are tokenized too
+    assert _looks_destructive("deleteNamespace", 0, 3)
+    assert _looks_destructive("scaleDeployment", 0, 3)
     # risk tier alone is enough even for a read-named tool
     assert _looks_destructive("namespaces_list", 4, 3)
 
