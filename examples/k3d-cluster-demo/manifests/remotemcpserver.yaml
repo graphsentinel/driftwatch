@@ -1,0 +1,21 @@
+# E7 path-B — point real Kagent at the DriftWatch chain-aware MCP proxy.
+#
+# Kagent reaches external MCP tool servers via a RemoteMCPServer CR. Instead of pointing it
+# straight at the real ToolServer, point it at the DriftWatch MCP proxy Service
+# (helm --set mcpProxy.enabled=true,mcpProxy.upstreamMcp=<real ToolServer>). The proxy then
+# governs every tools/call against the operator-reconciled baseline and forwards survivors
+# to the real ToolServer it fronts — no change to Kagent or the agent.
+#
+# NOTE: field names/apiVersion track the Kagent release you run — verify against your
+# installed Kagent CRD (`kubectl explain remotemcpserver`). Validated against kagent CRDs
+# v0.9.6 (apiVersion kagent.dev/v1alpha2).
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: driftwatch-governed-tools
+  namespace: kagent
+spec:
+  description: "Cluster tools, governed by DriftWatch (drift-scored at the MCP hop)"
+  # DriftWatch MCP proxy Service (driftwatch namespace), Streamable HTTP at /mcp:
+  url: http://driftwatch-mcp.driftwatch.svc.cluster.local:8000/mcp
+  protocol: STREAMABLE_HTTP

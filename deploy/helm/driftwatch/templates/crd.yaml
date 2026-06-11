@@ -1,0 +1,17 @@
+{{- if .Values.crd.install }}
+# CRDs. CANONICAL sources: deploy/crd/*.yaml. Helm's .Files.Get can only read inside the chart
+# dir and `helm package` rejects symlinks pointing outside the chart, so the chart keeps real
+# copies here. They are kept byte-identical to deploy/crd/ and tests/test_crd_sync.py fails CI if
+# they drift. To change a CRD: edit deploy/crd/<name>.yaml, then
+# `cp deploy/crd/<name>.yaml deploy/helm/driftwatch/<name>.yaml`.
+{{- $adp := .Files.Get "agentdriftpolicy.yaml" }}
+{{- if $adp }}
+{{ $adp }}
+{{- end }}
+---
+# AgenticArchitecture CRD (E11 — configure/declare layer). CANONICAL: deploy/crd/agenticarchitecture.yaml.
+{{- $aa := .Files.Get "agenticarchitecture.yaml" }}
+{{- if $aa }}
+{{ $aa }}
+{{- end }}
+{{- end }}

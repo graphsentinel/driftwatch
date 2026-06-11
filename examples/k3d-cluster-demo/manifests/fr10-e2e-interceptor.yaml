@@ -1,0 +1,56 @@
+# FR-10 / TC-F-21 in-cluster e2e — interceptor pod.
+#
+# Proves the operator→sidecar handoff across pods: this pod mounts the SAME baseline PVC
+# the operator wrote (driftwatch-baseline) READ-ONLY, runs driftwatch-interceptor, and
+# enforces the operator-reconciled policy via env. The fr10-e2e.sh script seeds the
+# baseline (operator side) then probes /v1/tool-call here.
+#
+# RWO PVC + k3d local-path (hostPath) → this pod MUST land on the operator's node, so it
+# can mount the same volume. nodeName is set by the script (placeholder below).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fr10-e2e-interceptor
+  namespace: driftwatch
+  labels: { app.kubernetes.io/name: driftwatch, app.kubernetes.io/component: fr10-e2e }
+spec:
+  # nodeName is injected by fr10-e2e.sh (must equal the operator's node for the RWO PVC).
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: interceptor
+      image: ghcr.io/graphsentinel/driftwatch:0.1.0a0
+      command: ["driftwatch-interceptor"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: ["ALL"] }
+      ports:
+        - { name: intercept, containerPort: 8080 }
+      env:
+        # the operator-reconciled policy, delivered to the sidecar (FR-10)
+        - { name: DRIFTWATCH_DATA_DIR,       value: "/data" }        # read-only baseline mount
+        - { name: DRIFTWATCH_ACTION,         value: "block" }
+        - { name: DRIFTWATCH_THRESHOLD,      value: "3.0" }
+        - { name: DRIFTWATCH_FAILURE_POLICY, value: "failClosed" }
+        - { name: DRIFTWATCH_FEATURES,       value: "tool,scope,sequence,argSchemaHash" }
+        - { name: DRIFTWATCH_WINDOW,         value: "50" }
+      readinessProbe:
+        httpGet: { path: /healthz, port: 8080 }
+        initialDelaySeconds: 2
+        periodSeconds: 2
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits:   { cpu: 100m, memory: 128Mi }
+      volumeMounts:
+        - { name: baseline, mountPath: /data, readOnly: true }   # sidecar reads; operator writes
+        - { name: tmp,      mountPath: /tmp }                     # writable scratch (readOnlyRootFs)
+  volumes:
+    - name: baseline
+      persistentVolumeClaim:
+        claimName: driftwatch-baseline
+    - name: tmp
+      emptyDir: {}

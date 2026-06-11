@@ -1,0 +1,34 @@
+# Demo policy — SHADOW (action: log). The on-ramp: scores every decision and emits the
+# gen_ai.agent.* schema to OTel, but blocks nothing. Apply this first, watch Grafana,
+# tune, then switch to agentdriftpolicy-enforce.yaml.
+#
+# Demo-specific (k3d): OTLP target is the podman-compose collector on the host.
+# This is the project's policy set — copy and adapt for your own cluster.
+apiVersion: driftwatch.graphsentinel.org/v1alpha1
+kind: AgentDriftPolicy
+metadata:
+  name: demo-shadow
+  namespace: driftwatch
+spec:
+  selector:
+    matchLabels: { app: kagent }      # governs both demo agents (kagent + goose share this label)
+  runtimes:
+    - name: kagent
+      adapter: builtin/kagent
+    - name: goose
+      adapter: builtin/goose
+  baseline:
+    sources: [approvedTraces, successfulRuns, dryRun]
+    aggregate: mean
+    window: 50
+  detection:
+    features: [tool, scope, sequence, argSchemaHash]
+    algorithm: streaming-zscore
+    threshold: 3.0
+  action: log                          # <- shadow: nothing is blocked
+  failurePolicy: failOpen              # shadow should never block, even on interceptor error
+  observability:
+    otel:
+      emitEvaluationOn: [baseline_deviation, danger_detected]
+      endpoint: "host.k3d.internal:4317"   # podman-compose collector on the host
+      protocol: grpc

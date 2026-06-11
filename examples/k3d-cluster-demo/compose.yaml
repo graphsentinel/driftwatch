@@ -1,0 +1,57 @@
+# Observability stack — decoupled, runs in podman-compose on the host (make obs-up).
+# Default services: OTel Collector + Jaeger + Prometheus + Grafana.
+# Neo4j (decision-graph forensics) is roadmap — behind the `forensics` profile, off by
+# default. DriftWatch in the k3d cluster only pushes OTLP here via host.k3d.internal:4317.
+# Where this lives never changes what the cluster enforces.
+version: "3.9"
+services:
+  otel-collector:
+    image: docker.io/otel/opentelemetry-collector-contrib:0.151.0
+    command: ["--config=/etc/otel/collector.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/collector.yaml:ro
+    ports:
+      - "4317:4317"     # OTLP gRPC  (host.k3d.internal:4317)
+      - "4318:4318"     # OTLP HTTP
+      - "8889:8889"     # Prometheus scrape
+
+  jaeger:
+    image: docker.io/jaegertracing/all-in-one:1.76.0
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "14317:4317"
+
+  prometheus:
+    image: docker.io/prom/prometheus:v3.11.3
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: docker.io/grafana/grafana:11.6.14
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana-dashboard.json:/var/lib/grafana/dashboards/agent-decisions.json:ro
+      - ./grafana-dashboard-agentgate.json:/var/lib/grafana/dashboards/agentgate.json:ro
+      - ./grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+    ports:
+      - "3000:3000"     # Grafana UI
+
+  # ROADMAP — decision-graph forensics is not wired yet in v1alpha1:
+  # the src/driftwatch/graph/ exporter is a stub, so nothing writes to Neo4j.
+  # Kept behind a compose profile so `make obs-up` does NOT start an empty DB.
+  # Enable once the exporter lands:  podman-compose --profile forensics up -d
+  neo4j:
+    image: docker.io/library/neo4j:5.26-community
+    profiles: ["forensics"]      # opt-in only — roadmap, not part of the default demo
+    environment:
+      - NEO4J_AUTH=neo4j/driftwatch
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ./data/neo4j:/data

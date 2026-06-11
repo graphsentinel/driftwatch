@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "driftwatch"
+version = "0.1.0a0"
+description = "Kubernetes operator that catches AI-agent decision drift before it reaches the API"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Mustafa DAYIOĞLU" }]
+dependencies = [
+    "opentelemetry-api>=1.24.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-otlp>=1.24.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+operator = ["kopf>=1.37.0", "kubernetes>=29.0.0,<31.0.0", "pykube-ng>=23.6.0"]
+interceptor = ["fastapi>=0.110.0", "uvicorn>=0.29.0"]
+graph = ["neo4j>=5.0.0"]
+# E7 MCP-proxy (path B): FastMCP owns MCP transport; we add only scoring middleware.
+# Opt-in — the core/library install stays lean. fastmcp pulls the official `mcp` SDK.
+mcp = ["fastmcp>=3.3.1"]
+dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0", "pytest-timeout>=2.3.0", "ruff>=0.4.0", "mypy>=1.10.0", "pyyaml>=6.0", "httpx>=0.27.0"]
+all = ["driftwatch[operator,interceptor,graph,mcp,dev]"]
+
+[project.scripts]
+driftwatch-operator = "driftwatch.operator.main:run"
+driftwatch-interceptor = "driftwatch.interceptor.main:run"
+# (run() lives in interceptor/main.py; server.py holds the ASGI build_app)
+driftwatch-mcp = "driftwatch.interceptor.mcp_proxy:run"   # E7 path-B chain-aware MCP proxy (needs .[mcp])
+driftwatch-eval = "driftwatch.cli:eval_main"
+driftwatch = "driftwatch.cli:main"                        # demo / eval / consensus-seed
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# Per-test timeout so a FastMCP in-memory client/proxy lifecycle hang fails fast in CI instead
+# of blocking the run. "thread" method works for asyncio event-loop hangs (signal-based won't).
+timeout = 60
+timeout_method = "thread"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,12 @@
+# k3d demo overrides: point OTLP at the podman-compose stack on the host.
+otel:
+  endpoint: host.k3d.internal:4317
+  protocol: grpc
+
+operator:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+
+interceptor:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }

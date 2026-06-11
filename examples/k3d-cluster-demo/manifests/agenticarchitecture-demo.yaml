@@ -1,0 +1,26 @@
+# E11/E12 — the declared layer as code. The operator reconciles this into a declared contract
+# (persisted to the shared PVC); the proxy loads it (DRIFTWATCH_CONTRACT_REF=demo-org +
+# DRIFTWATCH_AGENT_ID=demo-agent) and checks every call against it BEFORE the statistical baseline.
+#   E11 single-call: a call to a tool not in `tools` (e.g. k8s_pods_delete) → declared violation.
+#   E12 sequence:    the chain ending in the `deny` ordering → declared sequence violation.
+apiVersion: driftwatch.graphsentinel.org/v1alpha1
+kind: AgenticArchitecture
+metadata:
+  name: demo-org
+  namespace: driftwatch
+spec:
+  tools:
+    - { name: k8s_namespaces_list, category: k8s, risk: 1 }
+    - { name: k8s_pods_list,       category: k8s, risk: 1 }
+    - { name: k8s_pods_delete,     category: k8s, risk: 4 }
+  agents:
+    - name: demo-agent
+      tier: execution
+      # bound surface (least-privilege). k8s_pods_delete is NOT bound -> E11 declared violation.
+      tools: [k8s_namespaces_list, k8s_pods_list]
+  rules:
+    # E12 declared chain-rule: this exact contiguous ordering is forbidden even though both calls
+    # are otherwise allowed individually.
+    - deny: [k8s_namespaces_list, k8s_pods_list]
+      reason: "namespace recon immediately followed by pod enumeration (declared known-bad)"
+  topology: pyramid

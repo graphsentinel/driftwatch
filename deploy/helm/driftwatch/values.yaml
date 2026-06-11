@@ -1,0 +1,99 @@
+# DriftWatch Helm values (production defaults).
+image:
+  repository: ghcr.io/graphsentinel/driftwatch
+  tag: 0.1.0a0
+  # For reproducible review/demo installs, pin an immutable digest instead of the tag:
+  # set image.digest to "sha256:..." and the operator renders repository@digest, ignoring
+  # the tag. Empty = track the tag. See Docs/publishing-ghcr.md (release immutability).
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# Hardened by default (NFR-9). The image is already non-root (uid 10001); these enforce
+# it at the pod/container level. /data is an emptyDir mount, so readOnlyRootFilesystem
+# stays compatible with the sqlite baseline store.
+securityContext:
+  pod:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+operator:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 250m, memory: 256Mi }
+
+interceptor:
+  # injected as a sidecar into governed agent pods
+  port: 8080
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits:   { cpu: 100m, memory: 128Mi }
+
+# decoupled OTLP target — overridden per environment (see values-k3d.yaml)
+otel:
+  endpoint: otel-collector.observability.svc.cluster.local:4317
+  protocol: grpc
+
+crd:
+  install: true
+
+# Durable baseline persistence (NFR-10). Off by default (demo uses emptyDir, per-pod);
+# enable for production so the baseline survives operator restarts.
+persistence:
+  enabled: false
+  size: 1Gi
+  storageClassName: ""          # "" = cluster default StorageClass
+  accessModes: ["ReadWriteOnce"]
+
+rbac:
+  create: true
+  # CRD watch is cluster-scoped by nature, so the default is a ClusterRole. For
+  # least-privilege prod where policies live in one namespace, set namespaced=true to
+  # emit a namespace-scoped Role/RoleBinding instead (CRD read still needs cluster read).
+  namespaced: false
+
+webhook:
+  # Sidecar-injector mutating webhook. Default OFF in v1alpha1: the injector binary
+  # (driftwatch-injector) is roadmap; the supported path today is the manual sidecar
+  # in deploy/sidecar-manual.yaml. Set true once the injector image ships.
+  enabled: false
+  failurePolicy: Ignore        # Ignore so a webhook outage never blocks pod creation
+
+# E7 path-B: chain-aware MCP proxy in front of a real MCP ToolServer (governs real Kagent
+# via a RemoteMCPServer CR pointing at this Service). Off by default — opt-in for path B.
+# When enabled it REQUIRES mcpProxy.upstreamMcp and persistence.enabled=true (the proxy
+# mounts the operator-written baseline read-only from the shared PVC) and enforces the same
+# policy via env (FR-10). Needs the .[mcp] image extra (fastmcp).
+mcpProxy:
+  enabled: false
+  port: 8000
+  upstreamMcp: ""        # single-upstream: the real MCP ToolServer URL the proxy fronts
+  # cross-server (E10): front N MCP servers. Tools surface as "<name>_<tool>" (per-server
+  # namespacing); the cross-server transition is scored on the chain. Takes precedence over
+  # upstreamMcp. Names must be unique and contain no "_" (collision-free namespacing).
+  #   upstreams:
+  #     - { name: k8s,    url: "http://k8smcp-kubernetes-mcp-server.driftwatch.svc:8080/mcp" }
+  #     - { name: policy, url: "http://policy-mcp.driftwatch.svc:8080/mcp" }
+  upstreams: []          # provide upstreamMcp (single) OR upstreams (list) when enabled
+  taskType: ""           # optional: scope per-session chains to one task type
+  # E11 (configure/declare): enforce against a declared contract. Set to the name of an
+  # AgenticArchitecture the operator has reconciled (it persists <DATA_DIR>/contracts/<name>.json,
+  # which the proxy loads read-only). Empty = pure statistical drift (DriftWatch standalone).
+  contractRef: ""
+  # The agent this proxy seat fronts — the key the declared contract is checked against
+  # (AgenticArchitecture.spec.agents[].name). Required for the declared check to match an agent.
+  agentId: ""
+  action: block          # log | drop | block
+  threshold: "3.0"
+  failurePolicy: failClosed
+  features: "tool,scope,sequence,argSchemaHash"
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits:   { cpu: 200m, memory: 256Mi }

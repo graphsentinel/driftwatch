@@ -1,0 +1,33 @@
+# Demo policy — ENFORCE (action: block). Same selector/baseline as the shadow policy,
+# but now a drifting decision is stopped with 403 before it reaches kube-apiserver.
+# Apply this only after the shadow run has earned your trust.
+#
+# Demo-specific (k3d): OTLP target is the podman-compose collector on the host.
+apiVersion: driftwatch.graphsentinel.org/v1alpha1
+kind: AgentDriftPolicy
+metadata:
+  name: demo-enforce
+  namespace: driftwatch
+spec:
+  selector:
+    matchLabels: { app: kagent }
+  runtimes:
+    - name: kagent
+      adapter: builtin/kagent
+    - name: goose
+      adapter: builtin/goose
+  baseline:
+    sources: [approvedTraces, successfulRuns, dryRun]
+    aggregate: mean
+    window: 50
+  detection:
+    features: [tool, scope, sequence, argSchemaHash]
+    algorithm: streaming-zscore
+    threshold: 3.0
+  action: block                        # <- enforce: drift is blocked (403)
+  failurePolicy: failClosed            # if the interceptor can't score, deny (safe default)
+  observability:
+    otel:
+      emitEvaluationOn: [baseline_deviation, danger_detected]
+      endpoint: "host.k3d.internal:4317"
+      protocol: grpc

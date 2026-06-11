@@ -1,0 +1,13 @@
+# Grafana dashboard provider — auto-loads JSON dashboards from /var/lib/grafana/dashboards.
+# Mounted at /etc/grafana/provisioning/dashboards so "DriftWatch — agent-decisions"
+# appears on startup with no manual import.
+apiVersion: 1
+providers:
+  - name: driftwatch
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

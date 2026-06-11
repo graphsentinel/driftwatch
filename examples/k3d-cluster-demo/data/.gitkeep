@@ -1,0 +1,2 @@
+# Runtime state for the demo observability stack (neo4j volume, etc).
+# Bind-mounted by compose.yaml, git-ignored — never source.

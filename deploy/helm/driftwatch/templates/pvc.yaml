@@ -1,0 +1,17 @@
+{{- if .Values.persistence.enabled }}
+# Durable baseline store (NFR-10). The operator writes the reconciled baseline here;
+# with persistence on it survives restarts (vs the default per-pod emptyDir).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: driftwatch-baseline
+  labels: { app.kubernetes.io/name: driftwatch, app.kubernetes.io/component: operator }
+spec:
+  accessModes: {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- if .Values.persistence.storageClassName }}
+  storageClassName: {{ .Values.persistence.storageClassName }}
+  {{- end }}
+{{- end }}
