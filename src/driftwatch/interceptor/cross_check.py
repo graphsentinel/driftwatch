@@ -70,6 +70,17 @@ def predict_expected_tool(prompt: str, candidates: tuple[str, ...] | list[str], 
                               timeout=timeout)
             resp.raise_for_status()
             answer = (resp.json().get("message", {}) or {}).get("content", "") or ""
+        elif provider == "anthropic":
+            base = (endpoint or "https://api.anthropic.com").rstrip("/")
+            headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""),
+                       "anthropic-version": "2023-06-01", "content-type": "application/json"}
+            resp = httpx.post(f"{base}/v1/messages",
+                              json={"model": model, "max_tokens": 64, "system": sys_msg,
+                                    "messages": [{"role": "user", "content": user}]},
+                              headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            content = resp.json().get("content") or []
+            answer = "".join(b.get("text", "") for b in content if b.get("type") == "text")
         else:  # openai-compatible (openai/azure/runpod/vllm/tgi)
             base = (endpoint or "https://api.openai.com/v1").rstrip("/")
             key = (os.environ.get(f"{provider.upper().replace('-', '_')}_API_KEY")

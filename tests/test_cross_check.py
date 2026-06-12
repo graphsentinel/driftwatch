@@ -204,3 +204,18 @@ def test_predict_openai_compatible_runpod(monkeypatch):
     assert p == "pods_list"
     assert captured["url"].endswith("/chat/completions")
     assert captured["headers"]["Authorization"] == "Bearer rp-x"
+
+
+def test_predict_anthropic(monkeypatch):
+    # cross-check light LLM can be anthropic (Messages API → content[].text)
+    import driftwatch.interceptor.cross_check as ccm
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"content": [{"type": "text", "text": "pods_list"}]}
+
+    monkeypatch.setattr("httpx.post", lambda url, json=None, headers=None, timeout=None: _R())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    p = ccm.predict_expected_tool("list pods", ("pods_list", "pods_get"), model="claude",
+                                  provider="anthropic")
+    assert p == "pods_list"
