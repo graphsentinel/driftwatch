@@ -92,6 +92,15 @@ def predict_expected_tool(prompt: str, candidates: tuple[str, ...] | list[str], 
             parts = (((resp.json().get("candidates") or [{}])[0] or {}).get("content", {})
                      or {}).get("parts") or []
             answer = "".join(p.get("text", "") for p in parts if "text" in p)
+        elif provider == "bedrock":
+            import boto3   # AWS SDK — pip install driftwatch[bedrock]; ImportError → no signal
+            region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+                      or "us-east-1")
+            out = (boto3.client("bedrock-runtime", region_name=region).converse(
+                modelId=model, system=[{"text": sys_msg}],
+                messages=[{"role": "user", "content": [{"text": user}]}],
+            ).get("output", {}) or {}).get("message", {}) or {}
+            answer = "".join(b.get("text", "") for b in (out.get("content") or []) if "text" in b)
         else:  # openai-compatible (openai/azure/runpod/vllm/tgi)
             base = (endpoint or "https://api.openai.com/v1").rstrip("/")
             key = (os.environ.get(f"{provider.upper().replace('-', '_')}_API_KEY")

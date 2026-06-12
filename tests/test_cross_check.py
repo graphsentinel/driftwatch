@@ -234,3 +234,21 @@ def test_predict_gemini(monkeypatch):
     p = ccm.predict_expected_tool("list pods", ("pods_list", "pods_get"), model="gemini",
                                   provider="gemini")
     assert p == "pods_list"
+
+
+def test_predict_bedrock(monkeypatch):
+    # cross-check light LLM can be bedrock (boto3 Converse → output.message.content[].text)
+    import sys
+    import types
+    fake = types.ModuleType("boto3")
+
+    class _Client:
+        def converse(self, **kw):
+            return {"output": {"message": {"content": [{"text": "pods_list"}]}}}
+
+    fake.client = lambda *a, **k: _Client()
+    monkeypatch.setitem(sys.modules, "boto3", fake)
+    import driftwatch.interceptor.cross_check as ccm
+    p = ccm.predict_expected_tool("list pods", ("pods_list", "pods_get"), model="m",
+                                  provider="bedrock")
+    assert p == "pods_list"
