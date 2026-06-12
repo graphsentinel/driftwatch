@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -282,6 +283,26 @@ class DeclaredContract:
 
 # --- persistence: operator writes, interceptor/proxy reads (same data-plane as the baseline) ---
 
+# A contract ref becomes a FILENAME (`<ref>.json`), so it must be path-safe (consultant MAJOR): a ref
+# like `../../etc/x` or `/abs` would otherwise escape the contracts dir. Whitelist only — start with
+# an alphanumeric, then alphanumerics + `_.-`, max 64 chars. This rejects `/`, `\`, `..` (leading
+# dot), spaces, and every path separator while still allowing k8s names + "agentgate" + "baseline.v1".
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
+
+def valid_ref(ref: str) -> bool:
+    """True if `ref` is a safe contract name (path-traversal-proof filename). See `_REF_RE`."""
+    return isinstance(ref, str) and bool(_REF_RE.match(ref))
+
+
+def _require_ref(ref: str) -> str:
+    if not valid_ref(ref):
+        raise ValueError(
+            f"invalid contract ref {ref!r}: must match {_REF_RE.pattern} "
+            "(no path separators, no '..', no spaces)")
+    return ref
+
+
 def _contracts_dir(data_dir: str) -> Path:
     return Path(data_dir) / "contracts"
 
@@ -292,6 +313,7 @@ def save_contract(contract: DeclaredContract, data_dir: str, name: str) -> Path:
     Mirrors the baseline-store layout (operator writes to the mounted writable volume,
     `DRIFTWATCH_DATA_DIR`); the interceptor/proxy mounts the same path read-only and loads it.
     """
+    _require_ref(name)   # defense-in-depth: never let a ref escape the contracts dir (path traversal)
     d = _contracts_dir(data_dir)
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{name}.json"
@@ -305,6 +327,8 @@ def load_contract(data_dir: str, name: str) -> DeclaredContract | None:
     Returns None if absent — so a policy referencing a not-yet-reconciled contract degrades to
     pure statistical drift (standalone-safe) rather than failing.
     """
+    if not valid_ref(name):   # an unsafe ref can never name a stored contract → treat as absent
+        return None
     path = _contracts_dir(data_dir) / f"{name}.json"
     if not path.exists():
         return None
@@ -332,6 +356,8 @@ def load_all_contracts(data_dir: str) -> "dict[str, DeclaredContract]":
 
 def delete_contract(data_dir: str, name: str) -> None:
     """Remove a persisted contract (operator side, on CR delete) — no error if already gone."""
+    if not valid_ref(name):   # never resolve an unsafe ref to a path, even for delete
+        return
     (_contracts_dir(data_dir) / f"{name}.json").unlink(missing_ok=True)
 
 

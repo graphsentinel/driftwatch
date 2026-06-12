@@ -21,12 +21,15 @@ def apply_contract_push(interceptor: Interceptor, payload: dict) -> "tuple[int, 
     then routes to the matching contract. The first push also seeds the metaless default. Returns
     `(http_status, body)`.
     """
-    from ..library.contract import DeclaredContract
+    from ..library.contract import DeclaredContract, valid_ref
     try:
         c = DeclaredContract.from_dict(payload.get("contract") or {})
     except Exception as e:  # noqa: BLE001 — bad push → 400, never crash the proxy
         return 400, {"error": f"invalid contract: {e}"}
     ref = payload.get("ref") or payload.get("source") or "agentgate"
+    if not valid_ref(ref):   # consultant MAJOR: ref → filename; reject path traversal / bad input
+        return 400, {"error": f"invalid ref {ref!r}: must be alphanumeric + '_.-', start "
+                              "alphanumeric, ≤64 chars (no path separators, no '..')"}
     if interceptor.contracts is None:
         interceptor.contracts = {}
     interceptor.contracts[ref] = c                 # registry: keyed by app, no cross-app overwrite

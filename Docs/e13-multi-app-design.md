@@ -32,12 +32,27 @@ Three pieces, all back-compatible (no `_meta` / single-app deploy behaves exactl
 
 3. **Tool-call routing.** Every AgentGate tool call carries `_meta.app` (the same app id) and
    `_meta.agent` (the calling agent). `Interceptor.handle` routes:
-   - `_contract_for(_meta.app)` → that app's contract (falls back to the default when there is no
-     registry / no ref / unknown ref);
+   - **STRICT** when a populated registry is in play: `_meta.app` selects that app's contract; an
+     `app_ref` that names **no** registered contract is an *unknown app* → blocked (`unknown_app`
+     declared violation), **never** silently governed by another app's contract. Only a call with **no**
+     `_meta.app` (legacy / single-app / sidecar) falls back to the default contract.
    - `_meta.agent or chain.agent_id` → the agent identity for the declared check (so one shared proxy
      seat governs every agent of every app; the env-set `agent_id` is only the fallback).
 
    `baseline` stays keyed by `task_type` (shared/shareable); **chains** stay isolated per MCP session.
+
+   *Consequence of strict mode:* if an app's contract push hasn't landed yet (DriftWatch was down at
+   the app's startup), that app's calls block as `unknown_app` until it re-pushes — a loud, safe
+   misconfiguration signal rather than silent ungoverned forwarding. (`proxyType=driftwatch` means the
+   user *expects* governance.)
+
+### Ref safety
+
+The push `ref` becomes a filename (`<ref>.json`), so it is whitelist-validated — `valid_ref` /
+`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`: must start alphanumeric, then alphanumerics + `_.-`, ≤64 chars.
+This rejects `/`, `\`, `..` (leading dot), spaces, and every path separator, closing a path-traversal
+hole independent of auth. `/contracts` returns **400** on a bad ref; `save_contract` raises and
+`load_contract`/`delete_contract` treat an unsafe name as absent (defense-in-depth).
 
 ## Topology
 
@@ -76,13 +91,18 @@ read-only (the operator-writes / proxy-reads baseline invariant is kept; apps re
 
 ## Out of scope (deferred)
 
-- **AuthZ on `/contracts`** — any caller can currently push under any `ref`. Multi-app correctness
-  (this doc) is independent of access control; auth is tracked separately (consultant #2 / deferred).
+- **AuthZ on `/contracts`** — any *authenticated* caller can push under any (valid) `ref`. Input is
+  now validated (ref whitelist above), but there is no caller authentication/authorization yet:
+  multi-app correctness (this doc) is independent of access control; auth is tracked separately
+  (consultant #2 / deferred).
+- **Empty-tools agent = unconstrained** — `proxyType=driftwatch` auto-binds the proxy to every agent;
+  an agent with no declared `tools` is unconstrained for the per-call bind check (degrades cleanly).
+  Fine for demos; production should require explicit `tools` or `allow`/`deny` (consultant #3).
 
 ## Code
 
-- `interceptor/engine.py` — `Interceptor.contracts`, `_contract_for`, `_meta` routing in `handle`.
-- `library/contract.py` — `load_all_contracts(data_dir)`.
+- `interceptor/engine.py` — `Interceptor.contracts`, strict `_meta` routing in `handle` (unknown_app).
+- `library/contract.py` — `load_all_contracts(data_dir)`, `valid_ref` + hardened save/load/delete.
 - `interceptor/server.py` — `apply_contract_push` (transport-free; ref store, no overwrite).
 - `interceptor/mcp_proxy.py` — `_add_contracts_route`, factory shares `contracts`, `run()` seeds it.
 - AgentGate `server.py` `_maybe_govern` (push `ref`) + `codegen/runtime.py` (`_meta.app`).

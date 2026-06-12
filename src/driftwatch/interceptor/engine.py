@@ -68,19 +68,6 @@ class Interceptor:
         self.cc_votes = cc_votes
         self.cc_timeout = cc_timeout
 
-    def _contract_for(self, app_ref: str) -> "DeclaredContract | None":
-        """Resolve which declared contract governs this call (multi-app routing).
-
-        `app_ref` (from the call's `_meta.app`) selects the app's contract from the registry. Falls
-        back to the single/default `self.contract` when there is no registry, no ref, or the ref is
-        unknown — so a metaless caller (or single-app deploy) behaves exactly as before (back-compat).
-        """
-        if self.contracts and app_ref:
-            c = self.contracts.get(app_ref)
-            if c is not None:
-                return c
-        return self.contract
-
     def handle(self, raw_call: dict, baseline_id: str = "baseline.v1") -> Verdict:
         """Normalize -> [declared check] -> score -> enforce. Never raises; fails per policy."""
         try:
@@ -93,7 +80,22 @@ class Interceptor:
             meta = raw_call.get("meta") or {}
             app_ref = meta.get("app") or meta.get("ref") or ""
             agent_id = meta.get("agent") or chain.agent_id
-            contract = self._contract_for(app_ref)
+
+            # STRICT routing when a populated registry is in play (consultant): an `app_ref` that names
+            # no registered contract is an *unknown app* → block it, never silently fall back to some
+            # OTHER app's contract (that would govern app B's calls with app A's rules). Only a call
+            # with NO app_ref (legacy / single-app / sidecar) falls back to the default contract.
+            if app_ref and self.contracts:
+                contract = self.contracts.get(app_ref)
+                if contract is None:
+                    reason = (f"unknown app {app_ref!r}: no declared contract registered "
+                              "(central DriftWatch multi-app)")
+                    signals = self.emitter.emit_declared(
+                        chain, call.tool, reason, category=call.category, risk=call.risk,
+                        kind="unknown_app")
+                    return Verdict(BLOCK, 403, None, signals)
+            else:
+                contract = self.contract
 
             # E11 declared check (configure/declare layer): a deterministic known-bad pre-check
             # against the declared contract, BEFORE the statistical baseline. A call to a tool the

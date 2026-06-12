@@ -396,14 +396,53 @@ def test_meta_app_routes_to_the_right_contract():
     assert v.signals.get("declared") is not True
 
 
-def test_unknown_app_falls_back_to_default_contract():
-    # A call whose _meta.app isn't in the registry falls back to the single/default contract.
+def test_unknown_app_is_blocked_strict():
+    # STRICT (consultant): with a populated registry, a call tagged with an UNREGISTERED app is
+    # blocked as unknown_app — it must NOT fall back to another app's contract. toolA is bound in
+    # both contracts, so the block is purely the unknown app, not a tool-binding violation.
+    itc = Interceptor(_ready_store(), KagentAdapter(task_type="t", agent_id="worker"),
+                      action="block", contract=_app_contract("worker", ["toolA"]),
+                      contracts={"app-a": _app_contract("worker", ["toolA"])})
+    v = itc.handle({"tool": "toolA", "args": {}, "meta": {"app": "ghost", "agent": "worker"}})
+    assert v.outcome == BLOCK and v.signals.get("declared") is True
+    assert "unknown app" in v.signals["reason"]
+    assert v.signals["span"]["gen_ai.agent.computed.anomaly.kind"] == "unknown_app"
+
+
+def test_metaless_call_falls_back_to_default_even_with_registry():
+    # No _meta.app at all → legacy/default contract (sidecar/single-app path), even with a registry.
     itc = Interceptor(_ready_store(), KagentAdapter(task_type="t", agent_id="worker"),
                       action="block", contract=_app_contract("worker", ["toolA"]),
                       contracts={"app-a": _app_contract("worker", ["toolB"])})
-    # unknown app → default contract (binds toolA): toolB is a violation there
-    v = itc.handle({"tool": "toolB", "args": {}, "meta": {"app": "ghost", "agent": "worker"}})
-    assert v.outcome == BLOCK and v.signals.get("declared") is True
+    # default binds toolA; toolB with NO meta → declared violation against the DEFAULT contract
+    v = itc.handle({"tool": "toolB", "args": {}})
+    assert v.outcome == BLOCK and v.signals.get("declared") is True and "not bound" in v.signals["reason"]
+
+
+def test_apply_contract_push_rejects_unsafe_ref(tmp_path, monkeypatch):
+    # consultant MAJOR: ref becomes a filename → path traversal / bad input must be rejected (400)
+    monkeypatch.setenv("DRIFTWATCH_DATA_DIR", str(tmp_path))
+    from driftwatch.interceptor.server import apply_contract_push
+    itc = Interceptor(_ready_store(), KagentAdapter(task_type="t"), action="block")
+    good = _app_contract("w", ["toolA"]).to_dict()
+    for bad in ["../etc/passwd", "a/b", "..", "/abs", "has space", "x" * 65, ".hidden"]:
+        status, body = apply_contract_push(itc, {"ref": bad, "contract": good})
+        assert status == 400 and "invalid ref" in body["error"], bad
+    assert not itc.contracts   # nothing was stored from a rejected push
+
+
+def test_valid_ref_whitelist():
+    from driftwatch.library.contract import valid_ref
+    assert valid_ref("app-a") and valid_ref("baseline.v1") and valid_ref("checkout_1")
+    assert valid_ref("a") and valid_ref("A0")
+    for bad in ["../x", "a/b", "a\\b", "..", "/abs", ".hidden", "has space", "", "x" * 65]:
+        assert not valid_ref(bad), bad
+
+
+def test_save_contract_rejects_path_traversal(tmp_path):
+    from driftwatch.library.contract import save_contract
+    with pytest.raises(ValueError, match="invalid contract ref"):
+        save_contract(_app_contract("w", ["t"]), str(tmp_path), "../escape")
 
 
 def test_meta_agent_overrides_seat_agent_id():
