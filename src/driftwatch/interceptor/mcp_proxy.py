@@ -53,6 +53,8 @@ def make_session_interceptor_factory(template: Interceptor, task_type: str = "",
             features=template.features,
             emitter=template.emitter,             # shared emitter
             contract=template.contract,           # E11: shared declared contract (may be None)
+            contracts=template.contracts,         # multi-app: SAME registry dict (shared by reference,
+                                                  # so a /contracts hot-push is seen by every session)
         )
     return _make
 
@@ -247,6 +249,33 @@ def _drift_middleware_class():
     return DriftMiddleware
 
 
+def _add_contracts_route(app, interceptor: Interceptor) -> None:
+    """Mount a `POST /contracts` HTTP route on the FastMCP proxy app (central DriftWatch).
+
+    So N AgentGates push their declared contracts directly to the ONE proxy that fronts their tools —
+    the proxy is both the tool path and the contract receiver, owning a single in-memory registry. The
+    push updates `interceptor.contracts` (mutated in place → every per-session interceptor, which
+    shares the same dict by reference, sees it live). Body/return mirror the HTTP server's /contracts.
+    """
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+
+    from .server import apply_contract_push
+
+    @app.custom_route("/contracts", methods=["POST"])
+    async def _contracts(request: Request):   # noqa: ANN202 — starlette handler
+        try:
+            payload = await request.json()
+        except Exception as e:  # noqa: BLE001 — malformed body → 400
+            return JSONResponse(status_code=400, content={"error": f"invalid json: {e}"})
+        status, body = apply_contract_push(interceptor, payload)
+        return JSONResponse(status_code=status, content=body)
+
+    @app.custom_route("/healthz", methods=["GET"])
+    async def _healthz(request: Request):   # noqa: ANN202 — starlette handler
+        return JSONResponse({"status": "ok", "apps": sorted(interceptor.contracts or {})})
+
+
 def _validate_server_names(upstream: dict) -> None:
     """Guard that multi-upstream tool namespacing is **provably collision-free** (FR-16).
 
@@ -268,7 +297,7 @@ def _validate_server_names(upstream: dict) -> None:
         raise ValueError(f"duplicate upstream server names are not allowed: {names}")
 
 
-def build_mcp_proxy(upstream, factory: InterceptorFactory):
+def build_mcp_proxy(upstream, factory: InterceptorFactory, *, interceptor: "Interceptor | None" = None):
     """Wire a FastMCP proxy in front of `upstream`(s), with DriftWatch scoring middleware.
 
     Two shapes (E10 — cross-server, FR-16/FR-17):
@@ -321,10 +350,14 @@ def build_mcp_proxy(upstream, factory: InterceptorFactory):
         # session-class retry), surviving session-dropping upstreams (E10 reconnect). The
         # lifespan mount above still serves tools/list (discovery) over its long-lived clients.
         aggregator.add_middleware(_drift_middleware_class()(factory, upstreams=upstream))
+        if interceptor is not None:   # central DriftWatch: accept contract pushes on the proxy itself
+            _add_contracts_route(aggregator, interceptor)
         return aggregator
 
     proxy = create_proxy(upstream)
     proxy.add_middleware(_drift_middleware_class()(factory))
+    if interceptor is not None:       # central DriftWatch: accept contract pushes on the proxy itself
+        _add_contracts_route(proxy, interceptor)
     return proxy
 
 
@@ -367,6 +400,17 @@ def run() -> None:  # pragma: no cover - console entry point
     task_type = os.environ.get("DRIFTWATCH_TASK_TYPE", "")
     agent_id = os.environ.get("DRIFTWATCH_AGENT_ID", "")   # E11: which agent this seat fronts
     template = build_default_interceptor()  # policy + baseline from env / shared store (FR-10)
+    # Multi-app registry (central DriftWatch): seed from every persisted contract so a restart recovers
+    # all apps, not just DRIFTWATCH_CONTRACT_REF. Always a dict (never None) so /contracts pushes mutate
+    # it in place — shared by reference with every per-session interceptor (live, no rebind).
+    from ..library.contract import load_all_contracts
+    template.contracts = load_all_contracts(os.environ.get("DRIFTWATCH_DATA_DIR", "data"))
     proxy = build_mcp_proxy(
-        upstream, make_session_interceptor_factory(template, task_type, agent_id))
-    proxy.run(transport="http", host="0.0.0.0", port=8000)
+        upstream, make_session_interceptor_factory(template, task_type, agent_id),
+        interceptor=template)   # mount POST /contracts on the proxy → N AgentGates push here
+    host = os.environ.get("DRIFTWATCH_HOST", "0.0.0.0")
+    try:
+        port = int(os.environ.get("DRIFTWATCH_PORT", "8000"))
+    except ValueError:
+        port = 8000
+    proxy.run(transport="http", host=host, port=port)

@@ -80,6 +80,7 @@ def build_default_interceptor() -> Interceptor:
         features=_policy_features(),
         emitter=Emitter(endpoint=endpoint),
         contract=_load_contract(),   # E11: declared contract (None unless DRIFTWATCH_CONTRACT_REF set)
+        contracts=_load_contracts(),  # multi-app registry seeded from every persisted contract
         cc_model=cc_model, cc_endpoint=cc_endpoint, cc_provider=cc_provider,
         cc_votes=cc_votes, cc_timeout=cc_timeout,
     )
@@ -99,6 +100,17 @@ def _load_contract():
         return None
     from ..library.contract import load_contract
     return load_contract(os.environ.get("DRIFTWATCH_DATA_DIR", "data"), ref)
+
+
+def _load_contracts() -> "dict":
+    """Seed the multi-app registry (central DriftWatch) from every persisted contract (E13).
+
+    Each AgentGate persists under `<DATA_DIR>/contracts/<app>.json`; we load them all keyed by app
+    name so a restart recovers every app's declared contract. Always a dict (never None) so a later
+    /contracts push mutates it in place — shared by reference with per-session interceptors.
+    """
+    from ..library.contract import load_all_contracts
+    return load_all_contracts(os.environ.get("DRIFTWATCH_DATA_DIR", "data"))
 
 
 def run() -> None:  # pragma: no cover - console entry point

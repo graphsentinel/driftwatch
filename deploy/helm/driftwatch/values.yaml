@@ -89,7 +89,14 @@ mcpProxy:
   contractRef: ""
   # The agent this proxy seat fronts — the key the declared contract is checked against
   # (AgenticArchitecture.spec.agents[].name). Required for the declared check to match an agent.
+  # Multi-app note: with several AgentGates pushing here, the agent (and app) are taken per call from
+  # the tool's `_meta` (agent/app), so this single seat governs them all; agentId is only the fallback.
   agentId: ""
+  # Multi-app (central DriftWatch, N AgentGates): the proxy ALWAYS exposes POST /contracts and loads
+  # every persisted contract at startup, routing each call by `_meta.app`. persistContracts=true mounts
+  # the shared PVC writable so pushed contracts survive a proxy restart (else in-memory only → apps
+  # re-push on restart). Keeps the baseline read-by-operator invariant unless you opt in.
+  persistContracts: false
   action: block          # log | drop | block
   threshold: "3.0"
   failurePolicy: failClosed

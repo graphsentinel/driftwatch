@@ -311,6 +311,25 @@ def load_contract(data_dir: str, name: str) -> DeclaredContract | None:
     return DeclaredContract.from_dict(json.loads(path.read_text()))
 
 
+def load_all_contracts(data_dir: str) -> "dict[str, DeclaredContract]":
+    """Load EVERY persisted contract into a `{ref -> contract}` registry (multi-app, central DriftWatch).
+
+    The ref is the file stem (`<data_dir>/contracts/<ref>.json`), i.e. the app name each AgentGate
+    pushed under. Used to seed the in-memory registry at startup so a restart recovers all apps, not
+    just one `DRIFTWATCH_CONTRACT_REF`. Missing dir / unreadable file → skipped (standalone-safe).
+    """
+    out: dict[str, DeclaredContract] = {}
+    d = _contracts_dir(data_dir)
+    if not d.is_dir():
+        return out
+    for path in sorted(d.glob("*.json")):
+        try:
+            out[path.stem] = DeclaredContract.from_dict(json.loads(path.read_text()))
+        except Exception:  # noqa: BLE001 — a corrupt file must not sink the whole registry
+            continue
+    return out
+
+
 def delete_contract(data_dir: str, name: str) -> None:
     """Remove a persisted contract (operator side, on CR delete) — no error if already gone."""
     (_contracts_dir(data_dir) / f"{name}.json").unlink(missing_ok=True)

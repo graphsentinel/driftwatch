@@ -44,6 +44,7 @@ class Interceptor:
         features: "set[str] | None" = None,
         emitter: Emitter | None = None,
         contract: "DeclaredContract | None" = None,
+        contracts: "dict[str, DeclaredContract] | None" = None,
         cc_model: str = "", cc_endpoint: str = "", cc_provider: str = "ollama",
         cc_votes: int = 1, cc_timeout: float = 90.0,
     ):
@@ -54,7 +55,12 @@ class Interceptor:
         self.failure_policy = failure_policy
         self.features = features            # None -> all four (FR-2 detection.features)
         self.emitter = emitter or Emitter()
-        self.contract = contract            # E11: declared contract (None -> standalone, E1–E10)
+        self.contract = contract            # E11: single/default declared contract (None -> standalone)
+        # Multi-app registry (central DriftWatch, N AgentGates): {app_ref -> contract}. A tool call's
+        # `_meta.app` selects which app's contract governs it (routing). Shared by reference across
+        # per-session interceptors and hot-updated via /contracts. None/empty -> single-contract mode
+        # (back-compat): every call falls back to `self.contract`. See Docs/e13-multi-app-design.md.
+        self.contracts = contracts
         # E13 §4c — prompt-aware cross-check (shadow): light model + N-vote, off unless enabled.
         self.cc_model = cc_model
         self.cc_endpoint = cc_endpoint
@@ -62,26 +68,47 @@ class Interceptor:
         self.cc_votes = cc_votes
         self.cc_timeout = cc_timeout
 
+    def _contract_for(self, app_ref: str) -> "DeclaredContract | None":
+        """Resolve which declared contract governs this call (multi-app routing).
+
+        `app_ref` (from the call's `_meta.app`) selects the app's contract from the registry. Falls
+        back to the single/default `self.contract` when there is no registry, no ref, or the ref is
+        unknown — so a metaless caller (or single-app deploy) behaves exactly as before (back-compat).
+        """
+        if self.contracts and app_ref:
+            c = self.contracts.get(app_ref)
+            if c is not None:
+                return c
+        return self.contract
+
     def handle(self, raw_call: dict, baseline_id: str = "baseline.v1") -> Verdict:
         """Normalize -> [declared check] -> score -> enforce. Never raises; fails per policy."""
         try:
             call: ToolCall = self.adapter.observe(raw_call)
             chain: DecisionChain = self.adapter.chain
 
+            # Multi-app routing (central DriftWatch): the agent's `_meta` carries `app` (which app's
+            # contract governs) and `agent` (which agent in it is calling). The proxy seat's env-set
+            # agent_id is the fallback when a call carries no meta (sidecar/single-app path).
+            meta = raw_call.get("meta") or {}
+            app_ref = meta.get("app") or meta.get("ref") or ""
+            agent_id = meta.get("agent") or chain.agent_id
+            contract = self._contract_for(app_ref)
+
             # E11 declared check (configure/declare layer): a deterministic known-bad pre-check
             # against the declared contract, BEFORE the statistical baseline. A call to a tool the
             # agent is not bound to, or out of its declared scope, is a *declared violation* and is
             # blocked regardless of baseline readiness. No contract -> skipped (standalone == E1–E10).
-            if self.contract is not None:
-                risk = self.contract.risk_map.get(call.tool, call.risk)
+            if contract is not None:
+                risk = contract.risk_map.get(call.tool, call.risk)
                 # E11 single-call check (unbound tool / out-of-scope) — runs first.
-                reason = self.contract.check(chain.agent_id, call.tool, call.scope)
+                reason = contract.check(agent_id, call.tool, call.scope)
                 if reason is not None:
                     signals = self.emitter.emit_declared(
                         chain, call.tool, reason, category=call.category, risk=risk)
                     return Verdict(BLOCK, 403, None, signals)
                 # E12 declared chain-rule (forbidden deny-sequence on the chain's tail).
-                sreason = self.contract.check_sequence(chain.agent_id, chain.tools)
+                sreason = contract.check_sequence(agent_id, chain.tools)
                 if sreason is not None:
                     signals = self.emitter.emit_declared(
                         chain, call.tool, sreason, category=call.category, risk=risk,

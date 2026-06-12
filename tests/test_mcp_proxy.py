@@ -458,3 +458,40 @@ def test_score_once_across_a_reconnect_retry():  # D2
     asyncio.run(mw.on_call_tool(ctx, _call_next))
     assert scored["n"] == 1        # scored once
     assert cstate["n"] == 2        # forward retried once (reconnect)
+
+
+# --- multi-app: central DriftWatch, N AgentGates (proxy /contracts route + shared registry) ---
+
+def test_proxy_mounts_contracts_route_when_interceptor_given():
+    # central DriftWatch: the proxy itself accepts contract pushes (POST /contracts + /healthz)
+    template = Interceptor(_ready_store(), KagentAdapter(task_type="t"), action="block",
+                           contracts={})
+    factory = make_session_interceptor_factory(template, task_type="t")
+    up, _called = _fake_upstream()
+    proxy = build_mcp_proxy(up, factory, interceptor=template)
+    paths = {r.path for r in proxy._additional_http_routes}
+    assert "/contracts" in paths and "/healthz" in paths
+
+
+def test_proxy_push_is_seen_by_session_interceptors_and_routes(tmp_path, monkeypatch):
+    """A push to the proxy's registry is visible to every per-session interceptor (shared dict),
+    and `_meta.app` then routes a call to that app's declared contract."""
+    monkeypatch.setenv("DRIFTWATCH_DATA_DIR", str(tmp_path))   # writable, no cwd side-effect
+    from driftwatch.interceptor.server import apply_contract_push
+    from driftwatch.library.contract import build_contract
+
+    template = Interceptor(_ready_store(), KagentAdapter(task_type="t"), action="block",
+                           contracts={})
+    factory = make_session_interceptor_factory(template, task_type="t")
+    # an AgentGate pushes its contract (exactly what the /contracts route does)
+    status, _ = apply_contract_push(template, {
+        "source": "agentgate", "ref": "app-a",
+        "contract": build_contract({"agents": [{"name": "w", "tools": ["QueryLogs"]}]}).to_dict()})
+    assert status == 200
+
+    sess = factory()                                   # a fresh per-session interceptor
+    assert "app-a" in (sess.contracts or {})           # sees the push (shared registry by reference)
+    # routing: DeleteNamespace is unbound in app-a → declared violation via _meta.app
+    v = sess.handle({"tool": "DeleteNamespace", "args": {},
+                     "meta": {"app": "app-a", "agent": "w"}})
+    assert v.outcome == "block" and v.signals.get("declared") is True

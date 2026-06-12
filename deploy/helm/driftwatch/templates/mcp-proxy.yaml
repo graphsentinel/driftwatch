@@ -78,7 +78,9 @@ spec:
             {{- end }}
           resources: {{- toYaml .Values.mcpProxy.resources | nindent 12 }}
           volumeMounts:
-            - { name: baseline, mountPath: /data, readOnly: true }    # proxy reads; operator writes
+            # proxy reads operator-written baseline; writable only when persistContracts (so pushed
+            # contracts under /data/contracts survive a restart). Default read-only (invariant kept).
+            - { name: baseline, mountPath: /data, readOnly: {{ not .Values.mcpProxy.persistContracts }} }
             - { name: tmp,      mountPath: /tmp }                      # writable scratch (readOnlyRootFs)
       volumes:
         - name: baseline

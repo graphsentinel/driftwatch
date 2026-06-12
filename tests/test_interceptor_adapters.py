@@ -361,3 +361,96 @@ def test_http_register_contract_hot_reloads(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert r.json()["source"] == "agentgate"
     assert itc.contract is not None and "ops" in itc.contract.agents   # hot-reloaded → governs now
+
+
+# --- multi-app: central DriftWatch, N AgentGates (registry + _meta routing) ---
+
+def _app_contract(agent, tools):
+    from driftwatch.library.contract import build_contract
+    return build_contract({"agents": [{"name": agent, "tools": tools}]})
+
+
+def test_meta_app_routes_to_the_right_contract():
+    """Two apps registered; `_meta.app` selects which app's declared contract governs the call.
+
+    app-a binds only toolA; app-b binds only toolB. A toolB call tagged app-a is a declared violation
+    (toolB unbound in app-a's contract); the SAME toolB call tagged app-b forwards. Proves routing —
+    apps don't share a single contract (the old last-push-wins).
+    """
+    registry = {"app-a": _app_contract("worker", ["toolA"]),
+                "app-b": _app_contract("worker", ["toolB"])}
+    # one shared proxy seat (no env agent_id); identity comes from _meta per call
+    itc = Interceptor(_ready_store(), KagentAdapter(task_type="t"), action="block",
+                      contracts=registry)
+    # toolB tagged app-a → unbound in app-a's contract → declared violation
+    v = itc.handle({"tool": "toolB", "args": {},
+                    "meta": {"app": "app-a", "agent": "worker"}})
+    assert v.outcome == BLOCK and v.signals.get("declared") is True and "not bound" in v.signals["reason"]
+
+    # the SAME toolB tagged app-b → bound there → NOT a declared violation (routing picked app-b's
+    # contract). It then falls through to the statistical layer (asserting it's not a declared block
+    # isolates the routing decision from baseline state).
+    itc.adapter.reset()
+    v = itc.handle({"tool": "toolB", "args": {},
+                    "meta": {"app": "app-b", "agent": "worker"}})
+    assert v.signals.get("declared") is not True
+
+
+def test_unknown_app_falls_back_to_default_contract():
+    # A call whose _meta.app isn't in the registry falls back to the single/default contract.
+    itc = Interceptor(_ready_store(), KagentAdapter(task_type="t", agent_id="worker"),
+                      action="block", contract=_app_contract("worker", ["toolA"]),
+                      contracts={"app-a": _app_contract("worker", ["toolB"])})
+    # unknown app → default contract (binds toolA): toolB is a violation there
+    v = itc.handle({"tool": "toolB", "args": {}, "meta": {"app": "ghost", "agent": "worker"}})
+    assert v.outcome == BLOCK and v.signals.get("declared") is True
+
+
+def test_meta_agent_overrides_seat_agent_id():
+    """`_meta.agent` (the agent actually calling) drives the declared check, not the env seat.
+
+    Contract: worker binds toolA, admin binds toolB. Seat agent_id="worker". A toolA call tagged
+    agent="admin" is a declared violation (toolA unbound to admin) — proving the per-call meta identity
+    wins over the seat. The same toolA WITHOUT meta (seat=worker, where toolA IS bound) is not a
+    declared violation, so the verdict flips with the meta — that's the discriminator.
+    """
+    from driftwatch.library.contract import build_contract
+    contract = build_contract({"agents": [{"name": "worker", "tools": ["toolA"]},
+                                          {"name": "admin", "tools": ["toolB"]}]})
+    itc = Interceptor(_ready_store(), KagentAdapter(task_type="t", agent_id="worker"),
+                      action="block", contract=contract)
+    v = itc.handle({"tool": "toolA", "args": {}, "meta": {"agent": "admin"}})
+    assert v.outcome == BLOCK and v.signals.get("declared") is True and "not bound" in v.signals["reason"]
+
+    itc.adapter.reset()
+    v2 = itc.handle({"tool": "toolA", "args": {}})   # no meta → seat "worker", toolA bound → not declared
+    assert v2.signals.get("declared") is not True
+
+
+def test_apply_contract_push_registers_by_ref_no_overwrite(tmp_path, monkeypatch):
+    """Two apps push under their own ref → both coexist in the registry (no last-push-wins)."""
+    monkeypatch.setenv("DRIFTWATCH_DATA_DIR", str(tmp_path))
+    from driftwatch.interceptor.server import apply_contract_push
+    itc = Interceptor(_ready_store(), KagentAdapter(task_type="t"), action="block")
+    assert itc.contracts is None
+
+    s1, b1 = apply_contract_push(itc, {"source": "agentgate", "ref": "app-a",
+                                       "contract": _app_contract("w", ["toolA"]).to_dict()})
+    s2, b2 = apply_contract_push(itc, {"source": "agentgate", "ref": "app-b",
+                                       "contract": _app_contract("w", ["toolB"]).to_dict()})
+    assert s1 == 200 and s2 == 200
+    assert set(itc.contracts) == {"app-a", "app-b"}            # both kept, no overwrite
+    assert b2["apps"] == ["app-a", "app-b"]
+    # app-a's contract is intact after app-b's push
+    assert "toolA" in itc.contracts["app-a"].agents["w"].allowed_tools
+    assert "toolB" in itc.contracts["app-b"].agents["w"].allowed_tools
+
+
+def test_load_all_contracts_seeds_registry(tmp_path):
+    from driftwatch.library.contract import load_all_contracts, save_contract
+    save_contract(_app_contract("w", ["toolA"]), str(tmp_path), "app-a")
+    save_contract(_app_contract("w", ["toolB"]), str(tmp_path), "app-b")
+    reg = load_all_contracts(str(tmp_path))
+    assert set(reg) == {"app-a", "app-b"}
+    assert "toolB" in reg["app-b"].agents["w"].allowed_tools
+    assert load_all_contracts(str(tmp_path / "nope")) == {}    # missing dir → empty, no crash
