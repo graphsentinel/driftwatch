@@ -52,6 +52,25 @@ Prometheus + Grafana) is in `examples/k3d-cluster-demo/`.
 - Cross-check (opt-in, shadow): `DRIFTWATCH_CROSS_CHECK_ENABLED`, `_MODEL`, `_ENDPOINT`, `_VOTES`,
   `_TIMEOUT`
 
+## Reaching a host / remote LLM (and the collector) from the cluster (CoreDNS)
+
+The OTLP collector (`host.k3d.internal:4317`) and a host-local **Ollama** (cross-check light LLM, or
+baseline seeding) are reached from in-cluster pods by the **stable name** `host.k3d.internal` — no
+hardcoded IP in any manifest. Register it once (idempotent CoreDNS `NodeHosts` patch + restart):
+
+```bash
+# local Ollama / collector on the k3d host (default)
+./examples/k3d-cluster-demo/register-host-alias.sh driftwatch-demo
+
+# remote Ollama by IP or DNS name
+OLLAMA_HOST=10.0.0.42            ./examples/k3d-cluster-demo/register-host-alias.sh
+OLLAMA_HOST=ollama.corp.example  ./examples/k3d-cluster-demo/register-host-alias.sh
+```
+
+Then `DRIFTWATCH_OTLP_ENDPOINT=host.k3d.internal:4317` and a cross-check Ollama `endpoint` resolve
+from every pod. **Cloud cross-check providers** (openai-compatible / RunPod / anthropic / gemini /
+bedrock) use their public endpoints — no alias needed. See `examples/k3d-cluster-demo/SETUP_RUNBOOK.md`.
+
 ## Interop with AgentGate
 Separate repos, **no shared package** — only protocols: the `gen_ai.agent.*` semconv, the MCP `_meta`
 cross-check (AgentGate writes the prompt, DriftWatch reads it), and the `AgenticArchitecture` format
