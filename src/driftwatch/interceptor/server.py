@@ -31,6 +31,27 @@ def build_app(interceptor: Interceptor):  # pragma: no cover - needs fastapi
             },
         )
 
+    @app.post("/contracts")
+    def register_contract(payload: dict = Body(...)):
+        """E13 §4e — single-source interop. AgentGate (govern.proxyType=driftwatch) pushes its declared
+        contract here; we store + hot-reload it so the declared layer governs against it immediately —
+        no separate `kubectl apply` of an AgenticArchitecture. Body: {source, contract, ref?}."""
+        from ..library.contract import DeclaredContract
+        try:
+            c = DeclaredContract.from_dict(payload.get("contract") or {})
+        except Exception as e:  # noqa: BLE001 — bad push → 400, never crash the proxy
+            return JSONResponse(status_code=400, content={"error": f"invalid contract: {e}"})
+        interceptor.contract = c                      # hot-reload: govern against it now
+        ref = payload.get("ref") or "agentgate"
+        try:  # best-effort persist (skipped if the data dir is read-only)
+            import os
+
+            from ..library.contract import save_contract
+            save_contract(c, os.environ.get("DRIFTWATCH_DATA_DIR", "data"), ref)
+        except Exception:  # noqa: BLE001
+            pass
+        return {"stored": ref, "hash": c.hash, "source": payload.get("source")}
+
     @app.get("/healthz")
     def healthz():
         return {"status": "ok"}

@@ -334,3 +334,30 @@ def test_sidecar_reads_baseline_from_readonly_store(tmp_path, monkeypatch):  # T
             os.chmod(d, stat.S_IRWXU)
         for f in [p for p in paths if os.path.isfile(p)]:
             os.chmod(f, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def test_http_register_contract_hot_reloads(tmp_path, monkeypatch):
+    # E13 §4e — AgentGate pushes its declared contract; the interceptor stores + hot-reloads it
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    from driftwatch.library.contract import build_contract
+    from driftwatch.interceptor.server import build_app
+    monkeypatch.setenv("DRIFTWATCH_DATA_DIR", str(tmp_path))   # writable, no cwd side-effect
+    itc = Interceptor(_ready_store(), KagentAdapter(task_type="t"), action="block")
+    assert itc.contract is None                                # nothing declared yet
+    app = build_app(itc)
+    body = {"source": "agentgate",
+            "contract": build_contract({"agents": [{"name": "ops", "tools": ["pods_list"]}]}).to_dict()}
+
+    async def _go():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            return await c.post("/contracts", json=body)
+
+    r = asyncio.run(_go())
+    assert r.status_code == 200
+    assert r.json()["source"] == "agentgate"
+    assert itc.contract is not None and "ops" in itc.contract.agents   # hot-reloaded → governs now
