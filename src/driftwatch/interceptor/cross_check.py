@@ -81,6 +81,17 @@ def predict_expected_tool(prompt: str, candidates: tuple[str, ...] | list[str], 
             resp.raise_for_status()
             content = resp.json().get("content") or []
             answer = "".join(b.get("text", "") for b in content if b.get("type") == "text")
+        elif provider == "gemini":
+            base = (endpoint or "https://generativelanguage.googleapis.com").rstrip("/")
+            key = os.environ.get("GEMINI_API_KEY", "")
+            resp = httpx.post(f"{base}/v1beta/models/{model}:generateContent?key={key}",
+                              json={"contents": [{"role": "user",
+                                                  "parts": [{"text": f"{sys_msg}\n\n{user}"}]}]},
+                              timeout=timeout)
+            resp.raise_for_status()
+            parts = (((resp.json().get("candidates") or [{}])[0] or {}).get("content", {})
+                     or {}).get("parts") or []
+            answer = "".join(p.get("text", "") for p in parts if "text" in p)
         else:  # openai-compatible (openai/azure/runpod/vllm/tgi)
             base = (endpoint or "https://api.openai.com/v1").rstrip("/")
             key = (os.environ.get(f"{provider.upper().replace('-', '_')}_API_KEY")

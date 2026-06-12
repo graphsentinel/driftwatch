@@ -219,3 +219,18 @@ def test_predict_anthropic(monkeypatch):
     p = ccm.predict_expected_tool("list pods", ("pods_list", "pods_get"), model="claude",
                                   provider="anthropic")
     assert p == "pods_list"
+
+
+def test_predict_gemini(monkeypatch):
+    # cross-check light LLM can be gemini (generateContent → candidates[].content.parts[].text)
+    import driftwatch.interceptor.cross_check as ccm
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"candidates": [{"content": {"parts": [{"text": "pods_list"}]}}]}
+
+    monkeypatch.setattr("httpx.post", lambda url, json=None, headers=None, timeout=None: _R())
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    p = ccm.predict_expected_tool("list pods", ("pods_list", "pods_get"), model="gemini",
+                                  provider="gemini")
+    assert p == "pods_list"
