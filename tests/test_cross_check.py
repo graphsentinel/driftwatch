@@ -181,3 +181,26 @@ def test_cross_check_total_deadline_caps_votes(monkeypatch):
     r = cc.cross_check("x", "pods_list", CANDS, model="m", votes=10, total_timeout=0.5)
     assert calls["n"] < 10            # deadline stopped voting early
     assert r.votes <= calls["n"]      # never more usable votes than calls made
+
+
+def test_predict_openai_compatible_runpod(monkeypatch):
+    # cross-check light LLM can also be openai-compatible (OpenAI/Azure/RunPod/vLLM) — RunPod = endpoint
+    import driftwatch.interceptor.cross_check as ccm
+    captured = {}
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"choices": [{"message": {"content": "pods_list"}}]}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers or {}
+        return _R()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setenv("RUNPOD_API_KEY", "rp-x")
+    p = ccm.predict_expected_tool("list pods", ("pods_list", "pods_get"), model="m",
+                                  provider="runpod", endpoint="https://api.runpod.ai/v2/x/openai/v1")
+    assert p == "pods_list"
+    assert captured["url"].endswith("/chat/completions")
+    assert captured["headers"]["Authorization"] == "Bearer rp-x"

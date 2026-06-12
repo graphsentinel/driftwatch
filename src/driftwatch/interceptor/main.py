@@ -61,6 +61,7 @@ def build_default_interceptor() -> Interceptor:
     # E13 §4c — prompt-aware cross-check (shadow). Off unless DRIFTWATCH_CROSS_CHECK_ENABLED=true.
     cc_model = os.environ.get("DRIFTWATCH_CROSS_CHECK_MODEL", "")
     cc_endpoint = os.environ.get("DRIFTWATCH_CROSS_CHECK_ENDPOINT", "")
+    cc_provider = os.environ.get("DRIFTWATCH_CROSS_CHECK_PROVIDER", "ollama")
     try:
         cc_votes = int(os.environ.get("DRIFTWATCH_CROSS_CHECK_VOTES", "1"))
     except ValueError:
@@ -79,7 +80,8 @@ def build_default_interceptor() -> Interceptor:
         features=_policy_features(),
         emitter=Emitter(endpoint=endpoint),
         contract=_load_contract(),   # E11: declared contract (None unless DRIFTWATCH_CONTRACT_REF set)
-        cc_model=cc_model, cc_endpoint=cc_endpoint, cc_votes=cc_votes, cc_timeout=cc_timeout,
+        cc_model=cc_model, cc_endpoint=cc_endpoint, cc_provider=cc_provider,
+        cc_votes=cc_votes, cc_timeout=cc_timeout,
     )
 
 

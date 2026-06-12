@@ -42,37 +42,52 @@ def _match(predicted: str, candidates: tuple[str, ...]) -> str:
 
 
 def predict_expected_tool(prompt: str, candidates: tuple[str, ...] | list[str], *,
-                          model: str, endpoint: str = "", nonce: int = 0,
+                          model: str, endpoint: str = "", provider: str = "ollama", nonce: int = 0,
                           timeout: float = 90.0) -> str | None:
     """One light-LLM call: given `prompt`, which of `candidates` would you call? → a candidate or None.
 
-    Returns None on any failure (unreachable, bad response, no match) — a missing prediction is "no
-    signal", never an exception. `nonce` varies the call across votes without extra params.
+    `provider`: `ollama` (native /api/chat) OR an openai-compatible endpoint (openai/azure/runpod/
+    vllm — /v1/chat/completions, `endpoint`=base_url, key from <PROVIDER>_API_KEY). Returns None on
+    any failure (unreachable, bad response, no match) — a missing prediction is "no signal", never an
+    exception. `nonce` varies the call across votes.
     """
+    import os
     cands = tuple(candidates)
     if not prompt or not cands:
         return None
-    host = endpoint or _env("OLLAMA_HOST", "http://localhost:11434")
+    provider = (provider or "ollama").lower()
     sys_msg = ("You verify tool selection. Given the user's goal and a list of available tools, reply "
                "with EXACTLY ONE tool name from the list that should be called — no other words.")
     user = (f"Goal: {prompt}\nAvailable tools: {', '.join(cands)}\n"
             f"Answer with one tool name from the list.{'' if not nonce else f' (#{nonce})'}")
+    messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user}]
     try:
         import httpx
-        resp = httpx.post(f"{host}/api/chat", json={
-            "model": model,
-            "messages": [{"role": "system", "content": sys_msg}, {"role": "user", "content": user}],
-            "stream": False,
-        }, timeout=timeout)
-        resp.raise_for_status()
-        answer = (resp.json().get("message", {}) or {}).get("content", "") or ""
+        if provider == "ollama":
+            host = (endpoint or _env("OLLAMA_HOST", "http://localhost:11434")).rstrip("/")
+            resp = httpx.post(f"{host}/api/chat",
+                              json={"model": model, "messages": messages, "stream": False},
+                              timeout=timeout)
+            resp.raise_for_status()
+            answer = (resp.json().get("message", {}) or {}).get("content", "") or ""
+        else:  # openai-compatible (openai/azure/runpod/vllm/tgi)
+            base = (endpoint or "https://api.openai.com/v1").rstrip("/")
+            key = (os.environ.get(f"{provider.upper().replace('-', '_')}_API_KEY")
+                   or os.environ.get("OPENAI_API_KEY", ""))
+            headers = {"Authorization": f"Bearer {key}"} if key else {}
+            resp = httpx.post(f"{base}/chat/completions",
+                              json={"model": model, "messages": messages, "stream": False},
+                              headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            answer = (((resp.json().get("choices") or [{}])[0] or {}).get("message", {})
+                      or {}).get("content", "") or ""
     except Exception:  # noqa: BLE001 — LLM down / bad response → no signal
         return None
     return _match(answer, cands) or None
 
 
 def cross_check(prompt: str, observed_tool: str, candidates: tuple[str, ...] | list[str], *,
-                model: str, endpoint: str = "", votes: int = 1,
+                model: str, endpoint: str = "", provider: str = "ollama", votes: int = 1,
                 total_timeout: float = 90.0) -> CrossCheckResult:
     """Predict up to `votes` times, majority-vote, and flag divergence (observed not in predicted).
 
@@ -89,7 +104,8 @@ def cross_check(prompt: str, observed_tool: str, candidates: tuple[str, ...] | l
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break                                   # budget spent — stop voting (no signal beats hang)
-        p = predict_expected_tool(prompt, cands, model=model, endpoint=endpoint, nonce=i,
+        p = predict_expected_tool(prompt, cands, model=model, endpoint=endpoint, provider=provider,
+                                  nonce=i,
                                   timeout=remaining)
         if p:
             preds.append(p)

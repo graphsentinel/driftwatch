@@ -44,7 +44,8 @@ class Interceptor:
         features: "set[str] | None" = None,
         emitter: Emitter | None = None,
         contract: "DeclaredContract | None" = None,
-        cc_model: str = "", cc_endpoint: str = "", cc_votes: int = 1, cc_timeout: float = 90.0,
+        cc_model: str = "", cc_endpoint: str = "", cc_provider: str = "ollama",
+        cc_votes: int = 1, cc_timeout: float = 90.0,
     ):
         self.store = store
         self.adapter = adapter
@@ -57,6 +58,7 @@ class Interceptor:
         # E13 §4c — prompt-aware cross-check (shadow): light model + N-vote, off unless enabled.
         self.cc_model = cc_model
         self.cc_endpoint = cc_endpoint
+        self.cc_provider = cc_provider
         self.cc_votes = cc_votes
         self.cc_timeout = cc_timeout
 
@@ -129,8 +131,8 @@ class Interceptor:
             return
         try:
             r = cross_check(prompt, call.tool, candidates, model=self.cc_model,
-                            endpoint=self.cc_endpoint, votes=self.cc_votes,
-                            total_timeout=self.cc_timeout)
+                            endpoint=self.cc_endpoint, provider=self.cc_provider,
+                            votes=self.cc_votes, total_timeout=self.cc_timeout)
         except Exception:  # noqa: BLE001 — shadow must never break the hop
             return
         import logging
