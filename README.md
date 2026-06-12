@@ -7,6 +7,12 @@ every tool call against a **declared contract** and a **learned baseline**, then
 blocks drift in real time. It governs the *hand* (tool calls), not the *brain* (the LLM) — so it is
 framework- and model-agnostic.
 
+> **Scope (governance plane).** This repo *governs* agents; it does not generate them. It reconciles
+> the shared `AgenticArchitecture` (and `AgentDriftPolicy`) into a **declared governance contract**
+> (the E11/E12/E13 declared layer) — so the `AgenticArchitecture` CRD + operator live here by design.
+> Authoring/generating a multi-agent app from that same format is **AgentGate**, a separate repo.
+> The two share only the format + telemetry/`_meta` protocols, no code.
+
 ```
 agent ──▶ MCP tools/call ──▶ DriftWatch ──▶ [declared → baseline → cross-check] ──▶ upstream MCP
                                   │  log / drop / block  (gen_ai.agent.* spans → Jaeger/Prometheus)
