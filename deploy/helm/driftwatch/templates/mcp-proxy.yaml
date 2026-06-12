@@ -58,6 +58,23 @@ spec:
             {{- if .Values.mcpProxy.agentId }}
             - { name: DRIFTWATCH_AGENT_ID,        value: "{{ .Values.mcpProxy.agentId }}" }        # E11: which agent this seat fronts (contract key)
             {{- end }}
+            {{- with .Values.mcpProxy.crossCheck }}
+            {{- if .enabled }}
+            - { name: DRIFTWATCH_CROSS_CHECK_ENABLED,  value: "true" }                              # E13 §4c prompt-aware cross-check
+            - { name: DRIFTWATCH_CROSS_CHECK_PROVIDER, value: "{{ .provider | default "ollama" }}" }  # ollama|openai|anthropic|gemini|bedrock|runpod
+            - { name: DRIFTWATCH_CROSS_CHECK_MODEL,    value: "{{ .model }}" }
+            {{- if .endpoint }}
+            - { name: DRIFTWATCH_CROSS_CHECK_ENDPOINT, value: "{{ .endpoint }}" }                   # base_url (openai-compatible/runpod)
+            {{- end }}
+            {{- if .apiKeySecretRef.name }}
+            - name: {{ .apiKeySecretRef.envName | default "OPENAI_API_KEY" }}                       {{/* LLM key from a Secret */}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .apiKeySecretRef.name }}
+                  key: {{ .apiKeySecretRef.key | default "apiKey" }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           resources: {{- toYaml .Values.mcpProxy.resources | nindent 12 }}
           volumeMounts:
             - { name: baseline, mountPath: /data, readOnly: true }    # proxy reads; operator writes

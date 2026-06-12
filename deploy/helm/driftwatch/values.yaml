@@ -94,6 +94,17 @@ mcpProxy:
   threshold: "3.0"
   failurePolicy: failClosed
   features: "tool,scope,sequence,argSchemaHash"
+  # E13 §4c prompt-aware cross-check (shadow). The light LLM can be any provider; its API key comes
+  # from a Secret (never plaintext), mirroring AgentGate's spec.llm.apiKeySecretRef.
+  crossCheck:
+    enabled: false
+    provider: ollama       # ollama | openai | anthropic | gemini | bedrock | runpod (openai-compatible)
+    model: ""
+    endpoint: ""           # base_url for openai-compatible/runpod; host for ollama
+    apiKeySecretRef:
+      name: ""             # Secret name (empty → no key env; Ollama needs none)
+      key: "apiKey"        # data key inside the Secret
+      envName: "OPENAI_API_KEY"   # set per provider (ANTHROPIC_API_KEY / GEMINI_API_KEY / …)
   resources:
     requests: { cpu: 25m, memory: 96Mi }
     limits:   { cpu: 200m, memory: 256Mi }
