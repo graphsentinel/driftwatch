@@ -40,6 +40,7 @@ spec:
           env:
             - { name: DRIFTWATCH_OTLP_ENDPOINT,   value: "{{ .Values.otel.endpoint }}" }
             - { name: DRIFTWATCH_DATA_DIR,        value: "/data" }     # read-only baseline mount
+            - { name: DRIFTWATCH_PORT,            value: "{{ .Values.mcpProxy.port }}" }   # run() binds here
             {{- if .Values.mcpProxy.upstreams }}
             {{- $pairs := list }}
             {{- range .Values.mcpProxy.upstreams }}{{ $pairs = append $pairs (printf "%s=%s" .name .url) }}{{- end }}

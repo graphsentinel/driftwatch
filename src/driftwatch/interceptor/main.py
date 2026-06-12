@@ -104,4 +104,9 @@ def _load_contract():
 def run() -> None:  # pragma: no cover - console entry point
     import uvicorn
 
-    uvicorn.run(build_app(build_default_interceptor()), host="0.0.0.0", port=8080)
+    host = os.environ.get("DRIFTWATCH_HOST", "0.0.0.0")
+    try:
+        port = int(os.environ.get("DRIFTWATCH_PORT", "8080"))
+    except ValueError:
+        port = 8080
+    uvicorn.run(build_app(build_default_interceptor()), host=host, port=port)
