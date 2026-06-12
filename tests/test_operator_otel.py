@@ -143,3 +143,19 @@ def test_feature_mask_enforced():  # TC-F-23 (FR-2 — detection.features actual
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_cross_check_parsed_from_policy():
+    # E13 §4c — AgentDriftPolicy.crossCheck reconciles into Policy.cross_check (declarative, CRD-driven)
+    spec = {**GOOD_SPEC, "crossCheck": {
+        "enabled": True, "provider": "anthropic", "model": "claude-3-5-haiku",
+        "apiKeySecretRef": {"name": "llm-keys", "key": "anthropic", "envName": "ANTHROPIC_API_KEY"}}}
+    p = validate(spec)
+    assert p.cross_check["enabled"] is True
+    assert p.cross_check["provider"] == "anthropic"
+    assert p.cross_check["apiKeySecretRef"]["name"] == "llm-keys"
+
+
+def test_cross_check_invalid_provider_rejected():
+    with pytest.raises(PolicyError, match="crossCheck.provider"):
+        validate({**GOOD_SPEC, "crossCheck": {"provider": "cohere"}})

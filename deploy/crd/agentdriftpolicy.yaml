@@ -80,6 +80,21 @@ spec:
                           items: { type: string, enum: [baseline_deviation, danger_detected, inverse_scaling_trend] }
                         endpoint: { type: string }
                         protocol: { type: string, enum: [grpc, "http/protobuf"], default: grpc }
+                # E13 §4c — prompt-aware cross-check (shadow). The light LLM may be any provider; its
+                # API key is a Secret reference (never plaintext), mounted as <PROVIDER>_API_KEY.
+                crossCheck:
+                  type: object
+                  properties:
+                    enabled: { type: boolean }
+                    provider: { type: string }    # ollama|openai|azure|runpod|vllm|tgi|anthropic|gemini|bedrock
+                    model: { type: string }
+                    endpoint: { type: string }    # base_url (openai-compatible/runpod) / host (ollama)
+                    apiKeySecretRef:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        key: { type: string }
+                        envName: { type: string }   # e.g. ANTHROPIC_API_KEY
             status:
               type: object
               x-kubernetes-preserve-unknown-fields: true

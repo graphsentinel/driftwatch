@@ -11,6 +11,9 @@ VALID_ACTIONS = {"log", "drop", "block"}
 VALID_FEATURES = {"tool", "scope", "sequence", "argSchemaHash"}
 VALID_FAILURE = {"failClosed", "failOpen"}
 VALID_ALGORITHMS = {"streaming-zscore"}
+# E13 §4c cross-check light-LLM providers (mirror AgentGate). bedrock needs the boto3 extra.
+VALID_CC_PROVIDERS = {"ollama", "openai", "azure", "runpod", "vllm", "tgi",
+                      "anthropic", "gemini", "bedrock"}
 
 
 class PolicyError(ValueError):
@@ -31,6 +34,9 @@ class Policy:
     otel_endpoint: str | None = None
     emit_evaluation_on: list[str] = field(default_factory=list)
     contract_ref: str | None = None    # E11: AgenticArchitecture to enforce against (optional)
+    cross_check: dict = field(default_factory=dict)   # E13 §4c {enabled, provider, model, endpoint,
+                                                      # apiKeySecretRef} — declarative; the key stays
+                                                      # a Secret ref, never plaintext
 
     @property
     def model_seed(self) -> list[str]:
@@ -76,6 +82,13 @@ def validate(spec: dict) -> Policy:
         if "name" not in rt or "adapter" not in rt:
             raise PolicyError("each runtime needs name + adapter")
 
+    cross_check = spec.get("crossCheck") or {}
+    if cross_check:
+        ccp = cross_check.get("provider", "ollama")
+        if ccp not in VALID_CC_PROVIDERS:
+            raise PolicyError(
+                f"crossCheck.provider must be one of {sorted(VALID_CC_PROVIDERS)}, got {ccp!r}")
+
     otel = (spec.get("observability") or {}).get("otel") or {}
     return Policy(
         name=spec.get("_name", "agentdriftpolicy"),
@@ -90,4 +103,5 @@ def validate(spec: dict) -> Policy:
         otel_endpoint=otel.get("endpoint"),
         emit_evaluation_on=otel.get("emitEvaluationOn", []),
         contract_ref=spec.get("contractRef"),
+        cross_check=cross_check,
     )
