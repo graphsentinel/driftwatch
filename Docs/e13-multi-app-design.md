@@ -4,6 +4,10 @@
 bağlanır?"* — connect many AgentGate apps to a single DriftWatch governance plane, each governed
 against its **own** declared contract, without the apps overwriting each other.
 
+> **Routing contract (one line):** *If a tool call carries `_meta.app`, it must match a registered
+> contract — otherwise DriftWatch blocks it as `unknown_app`. A call with no `_meta.app` uses the
+> default/single contract (legacy/sidecar), unchanged.*
+
 ## The problem
 
 Before this change DriftWatch held a **single** declared contract:

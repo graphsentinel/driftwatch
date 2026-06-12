@@ -83,4 +83,20 @@ cross-check (AgentGate writes the prompt, DriftWatch reads it), and the `Agentic
 (AgentGate generates an app from it; DriftWatch reconciles it into a governance contract). AgentGate
 produces the action; DriftWatch governs it. Tool *selection* is always the agent's.
 
+## Multi-app: one central DriftWatch, N AgentGates
+A single DriftWatch can front **many** AgentGate apps. Each app pushes its declared contract under its
+own `ref` (its app id) and stamps that id into every tool call's `_meta.app`; DriftWatch keeps a
+registry `{app → contract}` and routes each call to the right one. Apps don't overwrite each other,
+and chains stay isolated per MCP session. Set the app id with `app:` (Helm; defaults to the release
+name) — it is both the push `ref` and the `_meta.app` routing key.
+
+> **Routing contract (behaviour to know when debugging):** if a tool call carries `_meta.app`, it
+> **must** match a registered contract — otherwise DriftWatch blocks it as an `unknown_app` declared
+> violation (it never silently falls back to another app's contract). A call with **no** `_meta.app`
+> uses the single/default contract (legacy / single-app / sidecar path), unchanged. So an app whose
+> contract hasn't been pushed yet (e.g. DriftWatch was down at its startup) is blocked until it
+> re-pushes — a loud misconfiguration signal, since `proxyType=driftwatch` means governance is
+> expected. The push `ref` is whitelist-validated (`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`); a bad ref
+> gets a `400`. Full design: `Docs/e13-multi-app-design.md`.
+
 See `VISION.md` for the full picture.
